@@ -14,15 +14,24 @@ func main() {
 	writer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers:  []string{"localhost:9092"},
 		Topic:    "test-topic",
-		Balancer: &kafka.Hash{}, // important for key-based partitioning
+		Balancer: &kafka.Hash{},
 	})
 	defer writer.Close()
 
 	for i := 0; i < 20; i++ {
 
+		var value string
+
+		// Inject failure at message-5
+		if i == 5 {
+			value = "fail"
+		} else {
+			value = fmt.Sprintf("message-%d", i)
+		}
+
 		msg := kafka.Message{
 			Key:   []byte(fmt.Sprintf("key-%d", i)),
-			Value: []byte(fmt.Sprintf("message-%d", i)),
+			Value: []byte(value),
 		}
 
 		err := writer.WriteMessages(context.Background(), msg)
@@ -30,7 +39,7 @@ func main() {
 			log.Fatal("Write error:", err)
 		}
 
-		fmt.Println("Produced:", string(msg.Value))
+		fmt.Println("Produced:", value)
 		time.Sleep(500 * time.Millisecond)
 	}
 }
