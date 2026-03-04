@@ -66,5 +66,6 @@ func processMessage(msg kafka.Message) error {
 	// Simulate work
 	time.Sleep(2 * time.Second)
 
+	
 	return nil
 }
