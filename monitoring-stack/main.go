@@ -68,5 +68,5 @@ func main() {
 		log.Fatal(http.ListenAndServe(":9091", nil))
 	}()
 
-	app.Listen(":8080")
+	log.Fatal(app.Listen(":8080"))
 }

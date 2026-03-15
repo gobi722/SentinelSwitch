@@ -23,7 +23,7 @@ Topic: test-topic       TopicId: ihSpGvklRsa0ljSWn1enYw PartitionCount: 3       
         Topic: test-topic       Partition: 0    Leader: 1       Replicas: 1     Isr: 1
         Topic: test-topic       Partition: 1    Leader: 1       Replicas: 1     Isr: 1
         Topic: test-topic       Partition: 2    Leader: 1       Replicas: 1     Isr: 1
-        
+
 [appuser@adbfa8e67ba5 ~]$ kafka-consumer-groups \
 >   --bootstrap-server localhost:9092 \
 >   --describe \
@@ -35,3 +35,12 @@ GROUP           TOPIC           PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG  
 test-group      test-topic      0          6               6               0               -               -               -
 test-group      test-topic      1          6               6               0               -               -               -
 test-group      test-topic      2          8               8               0               -               -      
+
+
+
+
+
+
+Grafanna Promethesus
+
+curl --location 'http://127.0.0.1:8080/pay'
