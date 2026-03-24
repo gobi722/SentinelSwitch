@@ -9,7 +9,8 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 
 ## 🧠 Architecture Overview
 
-                         ┌────────────────────┐
+           ```text
+                ┌────────────────────┐
                 │    API Gateway     │  (Go Fiber)
                 └─────────┬──────────┘
                           │
@@ -37,6 +38,7 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 │ Kafka Producer     │
 │ (fraud-result-topic)
 └────────────────────┘
+
 All services expose Prometheus metrics → scraped by Prometheus → visualized in Grafana
 
 
