@@ -1,4 +1,4 @@
-# 🚀 SentinelSwitch
+#  SentinelSwitch
 
 SentinelSwitch is a distributed, event-driven payment transaction and fraud monitoring platform built using Go.  
 It simulates a real-world payment switch architecture using Kafka, gRPC, PostgreSQL, Redis, Prometheus, Grafana, Docker, and Kubernetes.
@@ -60,7 +60,7 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 
 ---
 
-## 🔥 Microservices
+##  Microservices
 
 ### 1️⃣ API Gateway
 - Accepts transaction requests
