@@ -9,29 +9,37 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 
 ## 🧠 Architecture Overview
 
-                ┌─────────────┐
-                │ API Gateway │ (Fiber)
-                └──────┬──────┘
-                       │
-                       ▼
-                ┌─────────────┐
-                │ Kafka Topic │  ← transaction-events
-                └──────┬──────┘
-                       │
-       ┌───────────────┼───────────────┐
-       ▼                               ▼
-┌──────────────┐              ┌────────────────┐
-│ Fraud Engine │  (Consumer)  │ PersistenceSvc │
-│ + gRPC Call  │              │ (Consumer)     │
-└──────┬───────┘              └──────┬─────────┘
-       │                             │
-       ▼                             ▼
-   Risk Scoring (gRPC)          PostgreSQL
-       │
-       ▼
-   Kafka fraud-result-topic
+                      ┌────────────────────┐
+                │    API Gateway     │  (Go Fiber)
+                └─────────┬──────────┘
+                          │
+                          ▼
+                ┌────────────────────┐
+                │   Kafka Producer   │
+                │  (transaction-topic)
+                └─────────┬──────────┘
+                          │
+        ┌─────────────────┼─────────────────┐
+        ▼                                   ▼
+┌────────────────────┐           ┌────────────────────────┐
+│   Fraud Engine     │           │   Persistence Service   │
+│   (Kafka Consumer) │           │   (Kafka Consumer)      │
+└─────────┬──────────┘           └──────────┬──────────────┘
+          │                                 │
+          ▼                                 ▼
+┌────────────────────┐           ┌────────────────────────┐
+│ Risk Scoring Svc   │           │      PostgreSQL        │
+│     (gRPC)         │           │ (Partitioned Storage)  │
+└─────────┬──────────┘           └────────────────────────┘
+          │
+          ▼
+┌────────────────────┐
+│ Kafka Producer     │
+│ (fraud-result-topic)
+└────────────────────┘
 
-All services export Prometheus metrics → Grafana dashboards
+All services expose Prometheus metrics → scraped by Prometheus → visualized in Grafana
+
 
 ---
 
