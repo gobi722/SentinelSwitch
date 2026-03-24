@@ -9,37 +9,15 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 
 ## 🧠 Architecture Overview
 
----    
-                ┌────────────────────┐
-                │    API Gateway     │  (Go Fiber)
-                └─────────┬──────────┘
-                          │
-                          ▼
-                ┌────────────────────┐
-                │   Kafka Producer   │
-                │ (transaction-topic)│
-                └─────────┬──────────┘
-                          │
-        ┌─────────────────┼─────────────────┐
-        ▼                                   ▼
-┌────────────────────┐           ┌────────────────────────┐
-│   Fraud Engine     │           │   Persistence Service   │
-│ (Kafka Consumer)   │           │   (Kafka Consumer)      │
-└─────────┬──────────┘           └──────────┬──────────────┘
-          │                                 │
-          ▼                                 ▼
-┌────────────────────┐           ┌────────────────────────┐
-│ Risk Scoring Svc   │           │      PostgreSQL        │
-│      (gRPC)        │           │ (Partitioned Storage)  │
-└─────────┬──────────┘           └────────────────────────┘
-          │
-          ▼
-┌────────────────────┐
-│ Kafka Producer     │
-│ (fraud-result-topic)
-└────────────────────┘
-
----
+```mermaid
+graph TD
+A[API Gateway] --> B[Kafka Transaction Topic]
+B --> C[Fraud Engine]
+B --> D[Persistence Service]
+C --> E[gRPC Risk Scoring]
+D --> F[PostgreSQL]
+C --> G[Kafka Fraud Result Topic]
+```
 
 All services expose Prometheus metrics → scraped by Prometheus → visualized in Grafana
 
