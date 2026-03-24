@@ -9,7 +9,7 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 
 ## 🧠 Architecture Overview
 
-                      ┌────────────────────┐
+                ┌────────────────────┐
                 │    API Gateway     │  (Go Fiber)
                 └─────────┬──────────┘
                           │
@@ -21,7 +21,7 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
                           │
         ┌─────────────────┼─────────────────┐
         ▼                                   ▼
-┌────────────────────┐           ┌────────────────────────┐
+┌────────────────────┐           ┌───────────────── ───────┐
 │   Fraud Engine     │           │   Persistence Service   │
 │   (Kafka Consumer) │           │   (Kafka Consumer)      │
 └─────────┬──────────┘           └──────────┬──────────────┘
