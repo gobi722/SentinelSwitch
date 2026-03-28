@@ -94,5 +94,5 @@ Grafana dashboards visualize:
 ### 1️⃣ Clone the repository
 
 ```bash
-git clone https://github.com/your-username/sentinelswitch.git
+git clone https://github.com/gobi722/sentinelswitch.git
 cd sentinelswitch
