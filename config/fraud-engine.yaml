@@ -1,0 +1,184 @@
+# =============================================================================
+# SentinelSwitch — Fraud Engine Service Configuration
+# Ticket  : CREDO-ALERT-001
+# Service : fraud-engine
+# Role    : Core brain — consumes transactions, runs rules + velocity + gRPC
+#           scoring, publishes fraud_results
+# =============================================================================
+#
+# Processing pipeline per transaction (req.txt Step 3):
+#   3.1  Rule Engine   — fast synchronous checks (config: fraud-rules.yaml)
+#   3.2  Velocity      — Redis sorted sets per card (Redis DB 0)
+#   3.3  Feature prep  — build feature vector
+#   3.4  Risk Service  — gRPC CalculateRisk (with circuit breaker)
+#   Final: merge triggered_rules + risk_score → Decision → publish fraud_results
+#
+# Decision thresholds (authoritative in fraud-rules.yaml):
+#   risk_score < 400   → APPROVE
+#   400 ≤ score ≤ 700  → REVIEW
+#   score > 700        → DECLINE
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# KAFKA CONSUMER — transactions topic
+# Consumer group: fraud-engine-cg
+# Partition key used by producer: card_hash (ensures card ordering)
+# Manual commit: after rule evaluation + gRPC call + publish to fraud_results
+# -----------------------------------------------------------------------------
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}    # comma-separated list
+
+  consumer:
+    group_id: fraud-engine-cg
+    topic: transactions
+    auto_offset_reset: earliest        # on new group start, read from beginning
+    enable_auto_commit: false          # manual commit after full pipeline completes
+    max_poll_records: 500              # matches kafka-topics.yaml consumer_groups
+    max_poll_interval_ms: 30000        # must finish 500 records in 30 s
+    session_timeout_ms: 10000
+    heartbeat_interval_ms: 3000
+    fetch_min_bytes: 1                 # low latency — don't wait for batch to fill
+    fetch_max_wait_ms: 500
+
+    # Deserialization
+    value_deserializer: protobuf
+    schema_registry_url: ${SCHEMA_REGISTRY_URL:-http://localhost:8081}
+    schema_subject: transactions-value
+
+    client_id: sentinel-fraud-engine
+
+  producer:
+    # Publishes FraudResultEvent to fraud_results topic
+    topic: fraud_results
+    value_serializer: protobuf
+    schema_registry_url: ${SCHEMA_REGISTRY_URL:-http://localhost:8081}
+    schema_subject: fraud-results-value
+
+    acks: all
+    enable_idempotence: true
+    retries: 2147483647
+    delivery_timeout_ms: 30000
+    linger_ms: 5
+    batch_size_bytes: 65536
+    compression_type: lz4
+    client_id: sentinel-fraud-engine-producer
+
+# -----------------------------------------------------------------------------
+# REDIS — Fraud Engine uses DB 0 (velocity + merchant risk)
+#                                DB 2 (circuit breaker state)
+# Connection settings are inherited from redis.yaml at runtime.
+# This section declares which DBs this service accesses.
+# -----------------------------------------------------------------------------
+redis:
+  velocity_db:       0    # sorted sets: velocity:count:{rule}:{card_hash}
+  merchant_risk_db:  0    # strings: merchant_risk:{merchant_id}
+  circuit_breaker_db: 2   # strings: cb:risk_service:state / cb:risk_service:failures
+
+# -----------------------------------------------------------------------------
+# RULES & VELOCITY CONFIGURATION
+# The Fraud Engine loads fraud-rules.yaml at startup.
+# Hot-reload: file-watcher checks for changes every 30 s; no restart needed.
+# -----------------------------------------------------------------------------
+rules:
+  config_file: ${RULES_CONFIG_FILE:-config/fraud-rules.yaml}
+  hot_reload:
+    enabled: true
+    watch_interval_seconds: 30
+
+# -----------------------------------------------------------------------------
+# MERCHANT RISK CACHE WARM-UP
+# On startup, Fraud Engine loads merchant risk scores from PostgreSQL into
+# Redis (DB 0). This prevents cold-start misses where all merchants would
+# default to 0.5 risk.
+# -----------------------------------------------------------------------------
+merchant_risk:
+  warm_up_on_start: true
+  warm_up_batch_size: 500          # MSET batch size (avoids one huge command)
+  # SQL executed at warm-up:
+  #   SELECT merchant_id, risk_score FROM merchants ORDER BY updated_at DESC LIMIT 100000
+  warm_up_limit: 100000
+  # Fallback if warm-up query fails (non-fatal — service still starts)
+  warm_up_failure: warn_and_continue
+  default_on_miss: "0.5"           # neutral risk for unknown merchants
+
+# -----------------------------------------------------------------------------
+# RISK SERVICE — gRPC client
+# Fraud Engine calls Risk Service after rule + velocity checks.
+# Circuit breaker protects against Risk Service outages.
+# -----------------------------------------------------------------------------
+risk_service:
+  # gRPC endpoint
+  host: ${RISK_SERVICE_HOST:-risk-service}
+  port: ${RISK_SERVICE_PORT:-50052}
+  tls:
+    enabled: ${RISK_SERVICE_TLS_ENABLED:-false}
+    cert_file: ${RISK_SERVICE_TLS_CERT:-/etc/ssl/certs/risk-service.crt}
+
+  # Timeout per individual gRPC call (req.txt: 500 ms)
+  call_timeout_ms: 500
+
+  # Connection pool — keeps connections warm for low latency
+  pool:
+    max_connections: 10
+    keepalive_time_ms: 30000
+    keepalive_timeout_ms: 5000
+
+  # Circuit Breaker (runtime overrides — authoritative values in fraud-rules.yaml)
+  # These values must match circuit_breaker section in fraud-rules.yaml.
+  # Duplicated here so the Fraud Engine binary has them at init without reading
+  # fraud-rules.yaml before the file-watcher is ready.
+  circuit_breaker:
+    failure_threshold:    5        # open after 5 consecutive failures
+    success_threshold:    2        # close after 2 consecutive successes in HALF_OPEN
+    open_duration_ms:    15000     # stay OPEN for 15 s, then probe (HALF_OPEN)
+    fallback_risk_score: 600       # REVIEW — never auto-DECLINE on infra failure
+    fallback_decision:   REVIEW
+
+    # Shared state via Redis DB 2 — all FE replicas share circuit state
+    state_key:    "cb:risk_service:state"
+    failures_key: "cb:risk_service:failures"
+    state_ttl_seconds:    60       # OPEN auto-expires → transitions to HALF_OPEN
+    failures_ttl_seconds: 30       # failure counter resets after 30 s of no errors
+
+# -----------------------------------------------------------------------------
+# CONCURRENCY — pipeline worker pool
+# One goroutine per Kafka partition is the default Go Kafka consumer model.
+# Additional worker pool for parallel rule evaluation within a batch.
+# -----------------------------------------------------------------------------
+concurrency:
+  # Max parallel transactions processed simultaneously.
+  # Should not exceed max_poll_records to avoid head-of-line blocking.
+  worker_pool_size: ${FRAUD_ENGINE_WORKERS:-100}
+  # Max outstanding gRPC calls to Risk Service at any moment
+  max_concurrent_risk_calls: 50
+
+# -----------------------------------------------------------------------------
+# SERVER — metrics + health only (Fraud Engine has no inbound gRPC)
+# -----------------------------------------------------------------------------
+server:
+  metrics:
+    host: ${FRAUD_ENGINE_METRICS_HOST:-0.0.0.0}
+    port: ${FRAUD_ENGINE_METRICS_PORT:-9095}   # 9092 is Kafka broker — avoid collision
+    path: /metrics
+
+  health:
+    host: ${FRAUD_ENGINE_HEALTH_HOST:-0.0.0.0}
+    port: ${FRAUD_ENGINE_HEALTH_PORT:-8082}
+    liveness_path:  /healthz
+    readiness_path: /readyz
+    # Readiness depends on: Kafka consumer connected, Redis reachable,
+    # Risk Service reachable (or circuit open but fallback ready)
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  level: ${LOG_LEVEL:-info}        # debug | info | warn | error
+  format: json
+  default_fields:
+    service: fraud-engine
+    version: ${SERVICE_VERSION:-unknown}
+    env:     ${DEPLOY_ENV:-local}
+  # Emit structured log on every fraud decision (info level):
+  # Fields: txn_id, card_hash, risk_score, decision, triggered_rules, latency_ms
+  decision_log: true

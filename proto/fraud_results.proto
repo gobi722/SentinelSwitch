@@ -1,0 +1,109 @@
+// =============================================================================
+// SentinelSwitch — Kafka Topic Schema
+// Topic  : fraud_results
+// Ticket : CREDO-ALERT-001
+// Registry subject : fraud_results-value
+// Compatibility    : BACKWARD
+// =============================================================================
+
+syntax = "proto3";
+
+package sentinel.fraud.v1;
+
+option java_package         = "com.sentinelswitch.fraud.v1";
+option java_outer_classname = "FraudResultProto";
+option java_multiple_files  = true;
+option go_package           = "github.com/sentinelswitch/proto/fraud/v1";
+
+// Published by : Fraud Engine → Kafka topic: fraud_results
+// Consumed by  : Persistence Service
+//
+// DESIGN DECISION:
+//   This is a FULLY ENRICHED event. It carries the complete transaction payload
+//   plus the fraud decision. Persistence Service reads ONLY from this topic —
+//   no join with the transactions topic is needed. This eliminates the
+//   race condition where fraud_results arrives before transactions is written.
+//
+// Partition key : card_hash (consistent with transactions topic)
+
+message FraudResultEvent {
+
+    // ------------------------------------------------------------------
+    // Identity
+    // ------------------------------------------------------------------
+    string txn_id           = 1;  // Same UUID from TransactionEvent
+    string txn_timestamp    = 2;  // Original transaction time (ISO 8601)
+    string processed_at     = 3;  // Fraud Engine decision time (ISO 8601)
+
+    // ------------------------------------------------------------------
+    // Card (mirrored from TransactionEvent — no raw PAN)
+    // ------------------------------------------------------------------
+    string card_hash        = 4;
+    string masked_pan       = 5;
+
+    // ------------------------------------------------------------------
+    // Amount (minor units — same convention as TransactionEvent)
+    // ------------------------------------------------------------------
+    int64  amount_minor     = 6;
+    string currency         = 7;
+
+    // ------------------------------------------------------------------
+    // Merchant & Terminal (mirrored)
+    // ------------------------------------------------------------------
+    string merchant_id      = 8;
+    string terminal_id      = 9;
+    string mcc              = 10;
+
+    // ------------------------------------------------------------------
+    // Transaction Classification (mirrored)
+    // ------------------------------------------------------------------
+    TransactionType transaction_type = 11;
+    Channel         channel          = 12;
+    Scheme          scheme           = 13;
+
+    // ------------------------------------------------------------------
+    // Network Reference (mirrored)
+    // ------------------------------------------------------------------
+    string rrn              = 14;
+
+    // ------------------------------------------------------------------
+    // Fraud Decision (new fields — not in TransactionEvent)
+    // ------------------------------------------------------------------
+    Decision         decision         = 15;  // APPROVE / DECLINE / REVIEW
+    int32            risk_score       = 16;  // 100–1000
+    repeated string  triggered_rules  = 17;  // ["HIGH_AMOUNT", "VELOCITY_SPIKE"]
+}
+
+// ------------------------------------------------------------------
+// Enums — shared with transactions.proto but redeclared per-package
+// for schema registry independence
+// ------------------------------------------------------------------
+
+enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    APPROVE              = 1;
+    DECLINE              = 2;
+    REVIEW               = 3;
+}
+
+enum TransactionType {
+    TRANSACTION_TYPE_UNSPECIFIED = 0;
+    SALES                        = 1;
+    VOID                         = 2;
+    REFUND                       = 3;
+    REVERSAL                     = 4;
+}
+
+enum Channel {
+    CHANNEL_UNSPECIFIED = 0;
+    POS                 = 1;
+    PG                  = 2;
+}
+
+enum Scheme {
+    SCHEME_UNSPECIFIED = 0;
+    MASTERCARD         = 1;
+    VISA               = 2;
+    AMEX               = 3;
+    UNION_PAY          = 4;
+}

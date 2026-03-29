@@ -1,0 +1,214 @@
+# =============================================================================
+# SentinelSwitch — Risk Service Configuration
+# Ticket  : CREDO-ALERT-001
+# Service : risk-service
+# Role    : gRPC scoring engine — receives feature vector, returns risk_score
+#           and decision recommendation
+# =============================================================================
+#
+# Contract (proto: RiskService.CalculateRisk):
+#   Request  — RiskRequest  { txn_id, features: map<string, float> }
+#   Response — RiskResponse { risk_score: int32, decision: Decision,
+#                             contributing_factors: []string }
+#
+# Scoring model:
+#   risk_score = weighted sum of feature contributions (0–1000 scale)
+#   Weights in this file are tunable without redeployment.
+#   Decision thresholds are shared with fraud-rules.yaml for consistency.
+#
+# Failure case (req.txt Case 2 — Risk Service down):
+#   Fraud Engine circuit breaker opens → fallback score 600 (REVIEW)
+#   Risk Service itself does not need to know about the circuit breaker.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SERVER — gRPC
+# Fraud Engine is the only caller; no external traffic reaches this service.
+# -----------------------------------------------------------------------------
+server:
+  grpc:
+    host: ${RISK_SERVICE_GRPC_HOST:-0.0.0.0}
+    port: ${RISK_SERVICE_GRPC_PORT:-50052}
+
+    tls:
+      enabled: ${RISK_SERVICE_TLS_ENABLED:-false}
+      cert_file: ${RISK_SERVICE_TLS_CERT:-/etc/ssl/certs/risk-service.crt}
+      key_file:  ${RISK_SERVICE_TLS_KEY:-/etc/ssl/private/risk-service.key}
+
+    keepalive:
+      max_connection_idle_ms:    300000
+      max_connection_age_ms:    1800000
+      keepalive_time_ms:         60000
+      keepalive_timeout_ms:      10000
+
+    # Concurrent call limit — prevents CPU saturation at high load
+    max_concurrent_streams: ${RISK_SERVICE_MAX_STREAMS:-500}
+    max_recv_msg_size_bytes: 1048576
+    max_send_msg_size_bytes: 1048576
+
+  metrics:
+    host: ${RISK_SERVICE_METRICS_HOST:-0.0.0.0}
+    port: ${RISK_SERVICE_METRICS_PORT:-9094}
+    path: /metrics
+
+  health:
+    host: ${RISK_SERVICE_HEALTH_HOST:-0.0.0.0}
+    port: ${RISK_SERVICE_HEALTH_PORT:-8084}
+    liveness_path:  /healthz
+    readiness_path: /readyz
+
+# -----------------------------------------------------------------------------
+# DECISION THRESHOLDS
+# Must match decision_thresholds in fraud-rules.yaml.
+# Single source of truth is fraud-rules.yaml; this copy is for the Risk Service
+# binary to embed in its RiskResponse without reading the fraud rules file.
+# -----------------------------------------------------------------------------
+decision_thresholds:
+  approve_below: 400     # risk_score < 400  → APPROVE
+  review_from:   400     # 400 ≤ score ≤ 700 → REVIEW
+  review_to:     700
+  decline_above: 700     # risk_score > 700  → DECLINE
+
+# -----------------------------------------------------------------------------
+# SCORING MODEL — weighted feature contributions
+#
+# risk_score = Σ ( feature_value_normalised × weight ) × 1000
+# All weights must sum to ≤ 1.0. Weights are tuned by the fraud team.
+#
+# Feature names match feature_vector.fields in fraud-rules.yaml.
+#
+# Normalisation:
+#   - amount_minor          : log10(amount_minor) / 10   (caps at 1.0 above 10^10)
+#   - count features        : min(value, cap) / cap       (linear 0→1)
+#   - binary features       : 0.0 or 1.0
+#   - merchant_risk         : passed through as-is (already 0.0–1.0)
+# -----------------------------------------------------------------------------
+scoring:
+  model: weighted_linear    # options: weighted_linear | gradient_boosted (future)
+
+  features:
+
+    # -------------------------------------------------------------------------
+    # Amount signal
+    # -------------------------------------------------------------------------
+    - name: amount_minor
+      weight: 0.20           # 20% contribution
+      normalise:
+        method: log10        # log10(x) / log10(999999999999) ≈ log10(x) / 12
+        cap: 999999999999    # max minor units (~1B OMR)
+
+    # -------------------------------------------------------------------------
+    # Velocity — transaction count signals
+    # -------------------------------------------------------------------------
+    - name: txn_count_1min
+      weight: 0.15           # strong signal — rapid-fire in 60 s
+      normalise:
+        method: linear_cap
+        cap: 20              # 20+ txns/min → max contribution
+
+    - name: txn_count_5min
+      weight: 0.10
+      normalise:
+        method: linear_cap
+        cap: 30              # 30+ txns/5min → max contribution
+
+    - name: txn_count_1hr
+      weight: 0.05
+      normalise:
+        method: linear_cap
+        cap: 50              # 50+ txns/hr → max contribution
+
+    # -------------------------------------------------------------------------
+    # Velocity — amount signals
+    # -------------------------------------------------------------------------
+    - name: amount_sum_1min
+      weight: 0.15
+      normalise:
+        method: log10
+        cap: 1000000000      # 1M minor units (~1000 OMR)
+
+    - name: amount_sum_1hr
+      weight: 0.08
+      normalise:
+        method: log10
+        cap: 10000000000     # 10M minor units (~10,000 OMR)
+
+    # -------------------------------------------------------------------------
+    # Velocity — diversity signals
+    # -------------------------------------------------------------------------
+    - name: unique_merchants_5min
+      weight: 0.10
+      normalise:
+        method: linear_cap
+        cap: 10              # 10+ distinct merchants in 5 min → max contribution
+
+    - name: unique_terminals_5min
+      weight: 0.07
+      normalise:
+        method: linear_cap
+        cap: 10
+
+    # -------------------------------------------------------------------------
+    # Merchant risk
+    # -------------------------------------------------------------------------
+    - name: merchant_risk
+      weight: 0.05           # pre-computed 0.0–1.0 — passed through directly
+      normalise:
+        method: passthrough
+
+    # -------------------------------------------------------------------------
+    # Binary rule flags
+    # -------------------------------------------------------------------------
+    - name: is_night
+      weight: 0.02           # minor boost — night alone is low signal
+      normalise:
+        method: binary        # 0 or 1
+
+    - name: is_risky_mcc
+      weight: 0.02
+      normalise:
+        method: binary
+
+    - name: is_card_not_present
+      weight: 0.01
+      normalise:
+        method: binary
+
+  # Total configured weight: 1.00
+  # Validation: service refuses to start if Σ weights > 1.0
+
+  # Contributing factors — included in RiskResponse for explainability
+  # A feature is "contributing" when its normalised value × weight > threshold
+  contributing_factor_threshold: 0.05   # 5% of max score
+
+# -----------------------------------------------------------------------------
+# PERFORMANCE TUNING
+# Risk Service is CPU-bound (no I/O in hot path). Tune goroutine pool to
+# match available CPU cores without over-provisioning.
+# -----------------------------------------------------------------------------
+performance:
+  # Worker goroutines for scoring (0 = GOMAXPROCS)
+  scoring_workers: ${RISK_SERVICE_WORKERS:-0}
+  # Request timeout enforced server-side (client sets 500 ms; this is a guard)
+  request_timeout_ms: 450
+
+# -----------------------------------------------------------------------------
+# OBSERVABILITY — key metrics emitted
+# - sentinel_risk_score_histogram{decision="APPROVE|REVIEW|DECLINE"}
+# - sentinel_risk_request_latency_ms_histogram
+# - sentinel_risk_requests_total{status="success|error"}
+# - sentinel_risk_contributing_factors_total{feature_name="..."}
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  level: ${LOG_LEVEL:-info}
+  format: json
+  default_fields:
+    service: risk-service
+    version: ${SERVICE_VERSION:-unknown}
+    env:     ${DEPLOY_ENV:-local}
+  # Log risk score + decision at debug level (too verbose for info in production)
+  score_log_level: debug

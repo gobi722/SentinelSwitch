@@ -1,0 +1,18 @@
+# Run from repo root: buf generate
+# Requires: buf, protoc-gen-go, protoc-gen-go-grpc
+#
+#   go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+#   go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+#   go install github.com/bufbuild/buf/cmd/buf@latest
+#
+# Output lands in services/proto-gen/ with module path github.com/sentinelswitch/proto
+# (strips the module prefix from each proto's go_package option).
+
+version: v1
+plugins:
+  - plugin: go
+    out: services/proto-gen
+    opt: module=github.com/sentinelswitch/proto
+  - plugin: go-grpc
+    out: services/proto-gen
+    opt: module=github.com/sentinelswitch/proto,require_unimplemented_servers=false

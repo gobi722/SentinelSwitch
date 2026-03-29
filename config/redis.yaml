@@ -1,0 +1,229 @@
+# =============================================================================
+# SentinelSwitch — Redis Configuration
+# Ticket  : CREDO-ALERT-001
+# Clients : API Gateway (idempotency), Fraud Engine (velocity + merchant risk)
+# =============================================================================
+#
+# Redis use cases in SentinelSwitch:
+#
+#   1. Idempotency Guard (API Gateway)
+#      Prevents duplicate transaction events reaching Kafka.
+#      Key: idempotency:{txn_id}   Value: "1"   TTL: 24 h
+#
+#   2. Velocity Counters (Fraud Engine)
+#      Time-window sorted sets for per-card transaction counts and amounts.
+#      Key pattern: velocity:{rule_id}:{card_hash}
+#      Sliding TTL = window_seconds (set on every ZADD)
+#
+#   3. Merchant Risk Cache (Fraud Engine)
+#      Pre-computed merchant risk scores loaded from DB at startup, refreshed daily.
+#      Key pattern: merchant_risk:{merchant_id}   Value: float string   TTL: 86400 s
+#
+#   4. Circuit Breaker State (Fraud Engine → Risk Service)
+#      Tracks open/half-open/closed state for the Risk Service gRPC circuit breaker.
+#      Key: cb:risk_service:state     Value: "OPEN" | "HALF_OPEN" | "CLOSED"
+#      Key: cb:risk_service:failures  Value: integer counter   TTL: 60 s (resets on success)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# CONNECTION — Redis Cluster or Sentinel mode
+# Use REDIS_URL env var for the actual DSN; the cluster_nodes list is the
+# fallback for local / Docker Compose environments.
+# -----------------------------------------------------------------------------
+connection:
+  # Redis Cluster (production)
+  mode: cluster                     # options: standalone | cluster | sentinel
+  cluster_nodes:
+    - host: ${REDIS_NODE_1_HOST:-redis-node-1}
+      port: ${REDIS_NODE_1_PORT:-6379}
+    - host: ${REDIS_NODE_2_HOST:-redis-node-2}
+      port: ${REDIS_NODE_2_PORT:-6379}
+    - host: ${REDIS_NODE_3_HOST:-redis-node-3}
+      port: ${REDIS_NODE_3_PORT:-6379}
+
+  # Standalone (local dev / Docker Compose)
+  standalone:
+    host: ${REDIS_HOST:-localhost}
+    port: ${REDIS_PORT:-6379}
+    db:   0
+
+  auth:
+    password: ${REDIS_PASSWORD}     # Required in production; empty = no auth
+    tls:      ${REDIS_TLS:-false}   # true in production (TLS to Redis cluster)
+
+  # Connection pool
+  pool:
+    max_active:   50    # max open connections per service instance
+    max_idle:     10    # idle connections kept alive
+    idle_timeout: 300   # seconds before an idle connection is closed
+    dial_timeout: 2000  # ms — fail fast on connection attempt
+    read_timeout: 500   # ms — per-command read deadline
+    write_timeout: 500  # ms — per-command write deadline
+
+# -----------------------------------------------------------------------------
+# IDEMPOTENCY GUARD  (used by: API Gateway)
+# -----------------------------------------------------------------------------
+idempotency:
+  key_prefix: "idempotency"
+  # Key: idempotency:{txn_id}
+  # Value: "1"  (presence = seen; absence = new)
+  # SET NX EX {ttl_seconds}  — atomic check-and-set
+  ttl_seconds: 86400            # 24 hours (req.txt: "24-hour idempotency window")
+
+  # If Redis is unreachable, API Gateway falls through (allow-through policy):
+  #   - Log warning metric: sentinel_idempotency_redis_miss_total
+  #   - Publish to Kafka anyway — Persistence Service upsert handles duplicates
+  on_redis_unavailable: allow_through
+
+# -----------------------------------------------------------------------------
+# VELOCITY COUNTERS  (used by: Fraud Engine Rule Engine Step 3.2)
+#
+# Data structure: Redis Sorted Set
+#   Member : txn_id (string UUID)
+#   Score  : Unix timestamp (seconds)
+#
+# Per-window count:  ZCOUNT key (now - window_seconds) now
+# Per-window sum:    separate HASH key per card per window bucket
+#
+# Key patterns:
+#   velocity:count:{rule_id}:{card_hash}       — sorted set of txn timestamps
+#   velocity:amount:{rule_id}:{card_hash}      — sorted set of (txn_id, timestamp)
+#                                                 + companion HASH for amounts
+# Expiry: sliding — EXPIRE is reset on every ZADD to window_seconds + 60 s buffer
+# -----------------------------------------------------------------------------
+velocity:
+  key_prefix: "velocity"
+  # Prune old members from sorted sets to keep memory bounded.
+  # Called before ZCOUNT on each velocity check.
+  prune_on_read: true   # ZREMRANGEBYSCORE key 0 (now - window_seconds - buffer)
+  buffer_seconds: 60    # Extra TTL buffer beyond window to handle clock skew
+
+  # Per-rule window settings (mirrors fraud-rules.yaml for documentation clarity)
+  # Fraud Engine reads authoritative windows from fraud-rules.yaml;
+  # this section is reference-only and used by ops for Redis memory estimation.
+  windows:
+    - rule_id: TXN_COUNT_1MIN
+      window_seconds: 60
+      max_members_per_key: 50      # safety cap — evict oldest if exceeded
+
+    - rule_id: TXN_COUNT_5MIN
+      window_seconds: 300
+      max_members_per_key: 100
+
+    - rule_id: TXN_COUNT_1HR
+      window_seconds: 3600
+      max_members_per_key: 200
+
+    - rule_id: AMOUNT_SUM_1MIN
+      window_seconds: 60
+      max_members_per_key: 50
+
+    - rule_id: AMOUNT_SUM_1HR
+      window_seconds: 3600
+      max_members_per_key: 200
+
+    - rule_id: UNIQUE_MERCHANTS_5MIN
+      window_seconds: 300
+      # Uses HyperLogLog for approximate distinct count (memory efficient)
+      structure: hyperloglog
+      hll_key_pattern: "hll:merchants:{card_hash}:{window_bucket}"
+      # window_bucket = floor(now / 300)  — 5-minute epoch bucket
+
+    - rule_id: UNIQUE_TERMINALS_5MIN
+      window_seconds: 300
+      structure: hyperloglog
+      hll_key_pattern: "hll:terminals:{card_hash}:{window_bucket}"
+
+# -----------------------------------------------------------------------------
+# MERCHANT RISK CACHE  (used by: Fraud Engine feature preparation Step 3.3)
+# -----------------------------------------------------------------------------
+merchant_risk:
+  key_prefix: "merchant_risk"
+  # Key: merchant_risk:{merchant_id}
+  # Value: float as string, e.g. "0.75"
+  ttl_seconds: 86400              # 24 hours — refreshed by nightly batch job
+  default_on_miss: "0.5"         # unknown merchant → neutral risk (matches fraud-rules.yaml)
+
+  # Warm-up at Fraud Engine startup:
+  #   SELECT merchant_id, risk_score FROM merchants ORDER BY updated_at DESC
+  #   LIMIT 100000 → MSET merchant_risk:{id} {score} EX 86400
+  warm_up_on_start: true
+  warm_up_batch_size: 500         # MSET batch size to avoid single large command
+
+# -----------------------------------------------------------------------------
+# CIRCUIT BREAKER STATE  (used by: Fraud Engine → Risk Service gRPC)
+# State is stored in Redis so all Fraud Engine replicas share circuit state.
+# -----------------------------------------------------------------------------
+circuit_breaker:
+  key_prefix: "cb"
+  state_key:    "cb:risk_service:state"     # Value: CLOSED | OPEN | HALF_OPEN
+  failures_key: "cb:risk_service:failures"  # Value: integer (INCR)
+  state_ttl_seconds: 60                     # OPEN state auto-expires in 60 s
+                                            # → transitions to HALF_OPEN automatically
+  failures_ttl_seconds: 30                  # failure counter resets after 30 s of no errors
+
+# -----------------------------------------------------------------------------
+# MEMORY SIZING ESTIMATES
+# At 5 000 TPS with 1M active unique cards:
+#
+#   Idempotency:
+#     1 key / txn × 24 h retention = 5000 × 86400 = 432M keys
+#     → Use Redis OBJECT ENCODING string (embstr ≤ 44 bytes)
+#     → ~432M × ~80 bytes ≈ 34 GB  — requires Redis Cluster partitioning
+#     → Recommendation: dedicate a separate Redis logical DB (db:1) or cluster slot
+#
+#   Velocity sorted sets:
+#     Worst case: 1M cards × 7 rules × ~200 members × ~80 bytes ≈ 112 GB
+#     → In practice, most cards are not active in all windows simultaneously
+#     → Realistic estimate: 5–10 GB for active cards only
+#     → max_members_per_key caps runaway growth
+#
+#   Merchant risk: 100K merchants × 50 bytes ≈ 5 MB (negligible)
+#
+# Recommendation: separate Redis instances (or cluster namespaces) per use case:
+#   Redis DB 0 : velocity counters + merchant risk (Fraud Engine)
+#   Redis DB 1 : idempotency (API Gateway)
+#   Redis DB 2 : circuit breaker state (shared across FE replicas)
+# -----------------------------------------------------------------------------
+databases:
+  velocity:      0
+  idempotency:   1
+  circuit_breaker: 2
+
+# -----------------------------------------------------------------------------
+# EVICTION POLICY — per-database (requires separate Redis instances or logical
+# enforcement at the application layer if using a single Redis process)
+#
+# DB 0 (velocity):       allkeys-lru
+#   Velocity counters carry TTLs; LRU eviction under memory pressure is safe.
+#
+# DB 1 (idempotency):    noeviction  ← CRITICAL
+#   Silent LRU eviction of an idempotency key would cause the API Gateway to
+#   reprocess a duplicate request as if it were new — violating exactly-once
+#   semantics and potentially double-charging the card holder.
+#   Under noeviction Redis returns an OOM error on write; the API Gateway
+#   must treat OOM as a hard error and reject the incoming request (503)
+#   rather than silently proceeding. Capacity-alarm at 80% memory utilisation.
+#
+# DB 2 (circuit breaker): volatile-lru
+#   CB state keys carry TTLs; volatile-lru evicts only keyed items safely.
+#
+# Deployment note: strongly prefer three separate Redis instances so each can
+# be sized and tuned independently.  If a single instance is unavoidable,
+# set maxmemory-policy = noeviction at the instance level and rely on
+# per-key TTLs for DB 0 / DB 2 cleanup.
+# -----------------------------------------------------------------------------
+eviction:
+  db0_velocity:        allkeys-lru
+  db1_idempotency:     noeviction     # MUST NOT evict — see note above
+  db2_circuit_breaker: volatile-lru
+
+# -----------------------------------------------------------------------------
+# HEALTH CHECK
+# Fraud Engine and API Gateway ping Redis on startup and every 10 s.
+# On ping failure: emit metric sentinel_redis_health{status="down"}
+# -----------------------------------------------------------------------------
+health_check:
+  interval_seconds: 10
+  command: PING
+  timeout_ms: 200

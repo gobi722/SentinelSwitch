@@ -1,0 +1,189 @@
+# =============================================================================
+# SentinelSwitch — Kafka Topic Configuration
+# Ticket  : CREDO-ALERT-001
+# Managed : Confluent Cloud / self-hosted Kafka (apply via kafka-topics CLI
+#           or Terraform confluent_kafka_topic resource)
+# =============================================================================
+#
+# Sizing rationale
+# ----------------
+# Peak throughput target : 5 000 TPS (transactions per second)
+# Partition key          : card_hash  (uniform distribution, avoids hot spots)
+# Target partition load  : ≤ 500 msg/s per partition
+# → minimum 10 partitions for headroom; set to 12 for clean month-alignment
+#   if time-based consumer assignment is ever needed.
+#
+# Replication factor     : 3  (survives one broker loss without data loss)
+# min.insync.replicas    : 2  (producer acks=all → at least 2 replicas confirm)
+#
+# Retention policy
+# ----------------
+# transactions   : 3 days  — fraud engine must catch up within SLA window;
+#                            raw events are persisted to DB by Persistence Svc.
+# fraud_results  : 7 days  — downstream consumers (reporting, ops dashboards)
+#                            may need to replay up to one week.
+# =============================================================================
+
+topics:
+
+  # ---------------------------------------------------------------------------
+  # transactions
+  # Producer  : API Gateway
+  # Consumer  : Fraud Engine  (consumer group: fraud-engine-cg)
+  # Key       : card_hash (string)  — routes same card to same partition
+  # Value     : TransactionEvent (Protobuf, schema-registry managed)
+  # ---------------------------------------------------------------------------
+  - name: transactions
+    partitions: 12
+    replication_factor: 3
+    config:
+      # Retention: 3 days in milliseconds
+      retention.ms: "259200000"
+      # Keep last 50 GB per partition before age-based delete kicks in
+      retention.bytes: "53687091200"
+      # Cleanup policy: delete (no compaction — events are immutable)
+      cleanup.policy: "delete"
+      # Producer must get ack from all ISR replicas before commit
+      min.insync.replicas: "2"
+      # Max message size: 1 MB  (Protobuf payload is well under 10 KB; headroom)
+      max.message.bytes: "1048576"
+      # Compression: lz4  (best latency/ratio trade-off for small binary msgs)
+      compression.type: "lz4"
+
+  # ---------------------------------------------------------------------------
+  # transaction_dlq  (Dead Letter Queue)
+  # Producer  : Persistence Service — on DB write failure after max retries
+  # Consumer  : Ops team / retry worker (manual or scheduled)
+  # Key       : txn_id (string UUID)
+  # Value     : raw FraudResultEvent bytes (identical payload that failed)
+  #
+  # Failure scenario (from req.txt Case 3):
+  #   Persistence Service tries to upsert fraud result → DB unreachable
+  #   → retries with exponential backoff (3 attempts, max 30 s total)
+  #   → on 3rd failure → publish to transaction_dlq with failure metadata header
+  #
+  # DLQ message headers added by Persistence Service:
+  #   dlq-original-topic   : "fraud_results"
+  #   dlq-original-offset  : "<offset>"
+  #   dlq-original-partition: "<partition>"
+  #   dlq-failure-reason   : "<exception class>"
+  #   dlq-retry-count      : "3"
+  #   dlq-failed-at        : "<ISO 8601 UTC>"
+  #
+  # Retention: 14 days — ops team SLA to investigate and replay
+  # Partitions: 3 — DLQ volume is a small fraction of main topic
+  # ---------------------------------------------------------------------------
+  - name: transaction_dlq
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: "1209600000"    # 14 days in milliseconds
+      retention.bytes: "1073741824" # 1 GB per partition (DLQ is low volume)
+      cleanup.policy: "delete"
+      min.insync.replicas: "2"
+      max.message.bytes: "1048576"
+      compression.type: "lz4"
+
+  # ---------------------------------------------------------------------------
+  # fraud_results
+  # Producer  : Fraud Engine
+  # Consumer  : Persistence Service  (consumer group: persistence-svc-cg)
+  #             Ops Dashboard         (consumer group: ops-dashboard-cg)
+  # Key       : txn_id (string UUID)  — each result is independent
+  # Value     : FraudResultEvent (Protobuf, schema-registry managed)
+  # ---------------------------------------------------------------------------
+  - name: fraud_results
+    partitions: 12
+    replication_factor: 3
+    config:
+      # Retention: 7 days in milliseconds
+      retention.ms: "604800000"
+      # Keep last 20 GB per partition (result events are smaller than raw txns)
+      retention.bytes: "21474836480"
+      cleanup.policy: "delete"
+      min.insync.replicas: "2"
+      max.message.bytes: "1048576"
+      compression.type: "lz4"
+
+# =============================================================================
+# Producer settings (apply on all producers writing to this cluster)
+# =============================================================================
+producer_defaults:
+  acks: "all"                   # Wait for all ISR replicas
+  enable.idempotence: "true"    # Exactly-once delivery semantics
+  retries: "2147483647"         # Retry until delivery.timeout.ms
+  delivery.timeout.ms: "30000"  # 30 s hard cap on a single produce attempt
+  linger.ms: "5"                # Batch up to 5 ms to improve throughput
+  batch.size: "65536"           # 64 KB batch (lz4 compresses well)
+
+# =============================================================================
+# Consumer settings (apply per consumer group)
+# =============================================================================
+consumer_groups:
+
+  fraud-engine-cg:
+    auto.offset.reset: "earliest"
+    enable.auto.commit: "false"   # Manual commit after processing + DB write
+    max.poll.records: "500"
+    max.poll.interval.ms: "30000" # Must process 500 records within 30 s
+    session.timeout.ms: "10000"
+    heartbeat.interval.ms: "3000"
+    fetch.min.bytes: "1"          # Low latency — don't wait for batch to fill
+    fetch.max.wait.ms: "500"
+
+  persistence-svc-cg:
+    auto.offset.reset: "earliest"
+    enable.auto.commit: "false"
+    max.poll.records: "1000"      # Higher batch for bulk DB upserts
+    max.poll.interval.ms: "60000"
+    session.timeout.ms: "10000"
+    heartbeat.interval.ms: "3000"
+    fetch.min.bytes: "16384"      # 16 KB — accumulate a batch before fetch
+    fetch.max.wait.ms: "1000"
+
+  ops-dashboard-cg:
+    auto.offset.reset: "latest"   # Dashboard only needs live data
+    enable.auto.commit: "true"
+    auto.commit.interval.ms: "5000"
+    max.poll.records: "200"
+
+  dlq-retry-worker-cg:
+    auto.offset.reset: "earliest"
+    enable.auto.commit: "false"
+    max.poll.records: "50"        # Process DLQ slowly — each msg needs DB check
+    max.poll.interval.ms: "120000"
+    session.timeout.ms: "10000"
+    heartbeat.interval.ms: "3000"
+
+# =============================================================================
+# Confluent CLI — create / describe commands (reference)
+# =============================================================================
+#
+# Create:
+#   kafka-topics --bootstrap-server $BROKER \
+#     --create --topic transactions \
+#     --partitions 12 --replication-factor 3 \
+#     --config retention.ms=259200000 \
+#     --config min.insync.replicas=2 \
+#     --config compression.type=lz4
+#
+#   kafka-topics --bootstrap-server $BROKER \
+#     --create --topic fraud_results \
+#     --partitions 12 --replication-factor 3 \
+#     --config retention.ms=604800000 \
+#     --config min.insync.replicas=2 \
+#     --config compression.type=lz4
+#
+# Describe:
+#   kafka-topics --bootstrap-server $BROKER --describe --topic transactions
+#   kafka-topics --bootstrap-server $BROKER --describe --topic fraud_results
+#
+#   kafka-topics --bootstrap-server $BROKER \
+#     --create --topic transaction_dlq \
+#     --partitions 3 --replication-factor 3 \
+#     --config retention.ms=1209600000 \
+#     --config min.insync.replicas=2 \
+#     --config compression.type=lz4
+#
+#   kafka-topics --bootstrap-server $BROKER --describe --topic transaction_dlq
+# =============================================================================

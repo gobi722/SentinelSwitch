@@ -1,0 +1,175 @@
+# =============================================================================
+# SentinelSwitch — Persistence Service Configuration
+# Ticket  : CREDO-ALERT-001
+# Service : persistence-svc
+# Role    : Consumes fraud_results, upserts into PostgreSQL, DLQs on failure
+# =============================================================================
+#
+# Processing flow (req.txt Step 6):
+#   1. Consume FraudResultEvent from Kafka topic: fraud_results
+#   2. Upsert into PostgreSQL transactions table
+#      INSERT ... ON CONFLICT (txn_id, txn_timestamp) DO UPDATE SET ...
+#   3. On DB failure: retry with exponential backoff (3 attempts, max 30 s)
+#   4. After 3 failures: publish original message to transaction_dlq with
+#      failure metadata headers
+#   5. Commit Kafka offset only after successful DB write (or DLQ publish)
+#
+# Failure scenario (req.txt Case 3 — PostgreSQL down):
+#   Attempt 1: immediate
+#   Attempt 2: 5 s delay after attempt 1 failure
+#   Attempt 3: 10 s delay after attempt 2 failure  → total wait ≈ 15 s before DLQ
+#   DLQ retention: 14 days — ops team replays via dlq-retry-worker-cg
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# KAFKA CONSUMER — fraud_results topic
+# Consumer group: persistence-svc-cg
+# Manual commit: only after successful DB upsert OR DLQ publish
+# -----------------------------------------------------------------------------
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}    # comma-separated list
+
+  consumer:
+    group_id: persistence-svc-cg
+    topic: fraud_results
+    auto_offset_reset: earliest
+    enable_auto_commit: false          # manual commit — never lose a result
+    max_poll_records: 1000             # higher batch for bulk DB upserts
+    max_poll_interval_ms: 60000        # 60 s for DB batch upsert operations
+    session_timeout_ms: 10000
+    heartbeat_interval_ms: 3000
+    fetch_min_bytes: 16384             # 16 KB — accumulate a batch before fetch
+    fetch_max_wait_ms: 1000
+
+    # Deserialization
+    value_deserializer: protobuf
+    schema_registry_url: ${SCHEMA_REGISTRY_URL:-http://localhost:8081}
+    schema_subject: fraud-results-value
+    client_id: sentinel-persistence-svc
+
+  # DLQ producer — publishes failed records after max retries exhausted
+  dlq_producer:
+    topic: transaction_dlq
+    acks: all
+    enable_idempotence: true
+    retries: 5
+    delivery_timeout_ms: 30000
+    client_id: sentinel-persistence-svc-dlq
+
+    # Headers attached to every DLQ message (req.txt Case 3):
+    #   dlq-original-topic      : "fraud_results"
+    #   dlq-original-offset     : "<offset>"
+    #   dlq-original-partition  : "<partition>"
+    #   dlq-failure-reason      : "<exception class>"
+    #   dlq-retry-count         : "3"
+    #   dlq-failed-at           : "<ISO 8601 UTC>"
+    # These are set programmatically — documented here for ops reference.
+
+# -----------------------------------------------------------------------------
+# POSTGRESQL — primary datastore
+# Table: transactions (date-partitioned by txn_timestamp, monthly)
+# Upsert: ON CONFLICT (txn_id, txn_timestamp) DO UPDATE SET ...
+# -----------------------------------------------------------------------------
+postgres:
+  # Connection
+  host:     ${POSTGRES_HOST:-localhost}
+  port:     ${POSTGRES_PORT:-5432}
+  database: ${POSTGRES_DB:-sentinelswitch}
+  username: ${POSTGRES_USER:-sentinel}
+  password: ${POSTGRES_PASSWORD}          # required; unset = service refuses to start
+
+  # TLS
+  ssl_mode: ${POSTGRES_SSL_MODE:-disable}   # disable | require | verify-full
+  ssl_cert: ${POSTGRES_SSL_CERT:-}
+  ssl_key:  ${POSTGRES_SSL_KEY:-}
+  ssl_root_cert: ${POSTGRES_SSL_CA:-}
+
+  # Connection pool
+  pool:
+    max_open_conns:    ${POSTGRES_MAX_OPEN:-20}    # max active DB connections
+    max_idle_conns:    ${POSTGRES_MAX_IDLE:-5}     # idle connections kept alive
+    conn_max_lifetime: 1800                        # seconds — recycle after 30 min
+    conn_max_idle_time: 300                        # seconds — close idle after 5 min
+    connect_timeout_ms: 5000                       # fail fast on initial connect
+
+  # Upsert statement (matches db/migrations/001_create_transactions.sql)
+  upsert:
+    # Target: transactions table (partitioned by txn_timestamp)
+    # Conflict key: (txn_id, txn_timestamp) — required for partitioned upsert
+    conflict_columns: [txn_id, txn_timestamp]
+    # Columns updated on conflict (status, fraud decision fields)
+    update_columns:
+      - status
+      - risk_score
+      - triggered_rules
+      - decision
+      - processed_at
+      - updated_at
+
+  # Batch upsert — groups multiple records into a single statement
+  # Improves throughput at high volume vs. individual INSERTs
+  batch:
+    enabled: true
+    max_batch_size: 500            # max rows per batch INSERT
+    flush_interval_ms: 500         # flush batch every 500 ms even if not full
+
+# -----------------------------------------------------------------------------
+# RETRY POLICY — on PostgreSQL write failure
+# Exponential backoff with jitter. After max_attempts, publish to DLQ.
+# req.txt: "3 attempts, max 30 s total"
+# -----------------------------------------------------------------------------
+retry:
+  max_attempts: 3
+  # Delay per attempt (ms) — exponential backoff
+  initial_delay_ms: 5000           # attempt 2: 5 s after attempt 1
+  multiplier: 2.0                  # attempt 3: 10 s after attempt 2 → total wait ≈ 15 s
+  max_delay_ms: 10000              # cap individual delay at 10 s
+  # Jitter: ± 20% of calculated delay to prevent thundering herd
+  jitter_factor: 0.2
+  # Errors that trigger retry (others are non-retryable → immediate DLQ)
+  retryable_errors:
+    - connection_refused
+    - connection_timeout
+    - connection_reset
+    - server_error_5xx
+  non_retryable_errors:
+    - constraint_violation        # data error — DLQ for manual inspection
+    - invalid_input               # proto deserialization failure
+
+# -----------------------------------------------------------------------------
+# SERVER — metrics + health only
+# -----------------------------------------------------------------------------
+server:
+  metrics:
+    host: ${PERSISTENCE_SVC_METRICS_HOST:-0.0.0.0}
+    port: ${PERSISTENCE_SVC_METRICS_PORT:-9093}
+    path: /metrics
+
+  health:
+    host: ${PERSISTENCE_SVC_HEALTH_HOST:-0.0.0.0}
+    port: ${PERSISTENCE_SVC_HEALTH_PORT:-8083}
+    liveness_path:  /healthz
+    readiness_path: /readyz
+    # Readiness depends on: Kafka consumer connected, PostgreSQL reachable
+
+# -----------------------------------------------------------------------------
+# OBSERVABILITY — key metrics emitted
+# - sentinel_persistence_upserts_total{status="success|retry|dlq"}
+# - sentinel_persistence_batch_size_histogram
+# - sentinel_persistence_upsert_latency_ms_histogram
+# - sentinel_persistence_dlq_publishes_total
+# - sentinel_kafka_consumer_lag{group="persistence-svc-cg", topic="fraud_results"}
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  level: ${LOG_LEVEL:-info}
+  format: json
+  default_fields:
+    service: persistence-svc
+    version: ${SERVICE_VERSION:-unknown}
+    env:     ${DEPLOY_ENV:-local}
+  # Log every DLQ publish at warn level with dlq headers for ops tracing
+  dlq_log_level: warn

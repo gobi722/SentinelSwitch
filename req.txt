@@ -1,0 +1,239 @@
+
+Client
+  ↓
+API Gateway
+  - Validate
+  - Idempotency
+  - Publish to Kafka
+  ↓
+Kafka (transactions topic)
+  ↓
+Fraud Engine
+  - Rules
+  - Velocity (Redis)
+  - gRPC → Risk Service
+  ↓
+Risk Service
+  - Score calculation
+  ↓
+Fraud Engine
+  - Final decision
+  - Publish fraud_results
+  ↓
+Kafka (fraud_results)
+  ↓
+Persistence Service
+  - Store in PostgreSQL
+  ↓
+Metrics → Prometheus → Grafana
+
+
+
+COMPLETE END-TO-END FLOW (SentinelSwitch)
+
+We’ll follow a single transaction from entry → fraud decision → storage.
+
+🧾 🟢 STEP 0 — Client Sends Transaction
+
+Client sends request to API Gateway
+
+{
+  "mti": "0200",
+  "card_number": "411111XXXXXX1111",
+  "amount": 5000,
+  "merchant_id": "M123",
+  "terminal_id": "T456",
+  "currency": "INR"
+}
+🚪 🟡 STEP 1 — API Gateway (ENTRY POINT)
+Responsibilities:
+Validate request
+Generate txn_id
+Idempotency check
+Publish to Kafka
+Return ACK immediately
+Internal Flow:
+
+👉 Validate fields (amount, card, etc.)
+
+👉 Generate:
+
+txn_id = UUID()
+
+👉 Idempotency check (Redis):
+
+If exists → return duplicate response
+Else → store txn_id (TTL)
+
+👉 Enrich request:
+
+{
+  txn_id,
+  timestamp,
+  status: "RECEIVED"
+}
+
+👉 Publish to Kafka topic:
+
+transactions
+
+👉 Return response:
+
+{
+  "txn_id": "abc123",
+  "status": "ACCEPTED"
+}
+
+⚡ Important:
+
+API is non-blocking
+Does NOT wait for fraud result
+📨 🟠 STEP 2 — Kafka (Event Backbone)
+Topic: transactions
+
+Partition key:
+
+card_number hash
+
+Why?
+👉 All transactions of same card go in order
+
+🔍 🔴 STEP 3 — Fraud Engine (CORE BRAIN)
+
+Consumes from:
+
+transactions topic
+
+Now real work starts.
+
+3.1 Rule Engine (Fast Checks)
+
+Checks like:
+
+amount > threshold
+MCC risky
+night transaction
+
+If triggered:
+→ add to triggered_rules
+
+3.2 Velocity Engine (Redis)
+
+Check:
+
+transactions per card (last 60 sec)
+total amount
+unique merchants
+
+Example:
+
+Card used 5 times in 10 sec → suspicious
+3.3 Feature Preparation
+
+Build features:
+
+{
+  amount: 5000,
+  txn_count_1min: 5,
+  merchant_risk: 0.8,
+  geo_distance: 1200
+}
+3.4 Call Risk Scoring Service (gRPC)
+
+Fraud Engine → Risk Service
+
+Request:
+
+{
+  txn_id,
+  features: {...}
+}
+⚙️ 🟣 STEP 4 — Risk Scoring Service (gRPC)
+Responsibilities:
+Calculate risk score (100–1000)
+Return decision
+Example logic:
+risk_score =
+  (amount_weight * amount) +
+  (velocity_weight * txn_count) +
+  (merchant_weight * risk)
+Response:
+{
+  "risk_score": 742,
+  "decision": "REVIEW"
+}
+🔙 🔴 STEP 5 — Back to Fraud Engine
+
+Now combine everything:
+
+{
+  txn_id,
+  risk_score: 742,
+  decision: "REVIEW",
+  triggered_rules: [...]
+}
+Final Decision Logic:
+Score Range	Decision
+< 400	APPROVE
+400–700	REVIEW
+> 700	DECLINE
+
+👉 Publish result to Kafka:
+
+fraud_results topic
+💾 🔵 STEP 6 — Persistence Service
+
+Consumes from:
+
+transactions
+fraud_results
+6.1 Store Transaction
+
+Insert into PostgreSQL:
+
+transactions table
+6.2 Update Fraud Result
+
+Update same txn:
+
+status = APPROVED / DECLINED
+risk_score = 742
+
+👉 Use:
+
+Partitioning by date
+Index on txn_id
+📊 🟢 STEP 7 — Metrics Collection
+
+Each service exposes metrics
+
+Collected by:
+👉 Prometheus
+Visualized in:
+👉 Grafana
+
+🔁 🔥 FAILURE FLOW (IMPORTANT)
+❌ Case 1 — Fraud Engine Crash
+Kafka retains message
+Another consumer picks it
+No data loss
+❌ Case 2 — Risk Service Down
+
+Fraud Engine:
+
+Circuit breaker triggers
+Uses fallback score
+❌ Case 3 — DB Failure
+
+Persistence Service:
+
+→ Push to:
+
+transaction_dlq
+
+Retry later
+
+❌ Case 4 — Duplicate Request
+
+Handled at:
+👉 API Gateway (Redis idempotency)

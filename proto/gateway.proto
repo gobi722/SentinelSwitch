@@ -1,0 +1,195 @@
+// =============================================================================
+// SentinelSwitch — API Gateway Inbound Contract
+// Service : GatewayService
+// Ticket  : CREDO-ALERT-001
+//
+// This file defines the synchronous gRPC surface that the API Gateway
+// exposes to merchant-facing clients (POS terminals, payment-page SDKs).
+//
+// Request flow:
+//   Client → API Gateway (SubmitTransaction)
+//            ├─ publishes TransactionEvent to Kafka topic: transactions
+//            └─ returns TransactionAck (txn_id + initial_status) immediately
+//
+// The fraud decision is asynchronous.  Clients that need the final
+// fraud result must either:
+//   a) poll  GetTransactionStatus(txn_id)  — suitable for POS/PG
+//   b) subscribe to a webhook (configured per merchant, out of scope here)
+//
+// Authorization:
+//   Every call must carry a valid Bearer JWT in the gRPC metadata key
+//   "authorization".  The JWT is validated by the API Gateway before the
+//   handler runs.  Merchant claims are embedded in the token; the gateway
+//   derives merchant_id from the JWT rather than trusting the request body.
+// =============================================================================
+
+syntax = "proto3";
+
+package sentinel.gateway.v1;
+
+option java_package         = "com.sentinelswitch.gateway.v1";
+option java_outer_classname = "GatewayProto";
+option java_multiple_files  = true;
+option go_package           = "github.com/sentinelswitch/proto/gateway/v1";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Service
+// ─────────────────────────────────────────────────────────────────────────────
+
+service GatewayService {
+
+    // Submit a new transaction for fraud analysis.
+    // Returns immediately with a txn_id and PENDING status.
+    // SLA: P99 < 50 ms (gateway only — excludes async fraud processing).
+    rpc SubmitTransaction (TransactionRequest) returns (TransactionAck);
+
+    // Poll the fraud decision for a previously submitted transaction.
+    // Returns NOT_FOUND if the txn_id is unknown or has expired from cache.
+    // SLA: P99 < 30 ms (Redis cache read).
+    rpc GetTransactionStatus (StatusRequest) returns (TransactionStatusResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SubmitTransaction — request
+// ─────────────────────────────────────────────────────────────────────────────
+
+message TransactionRequest {
+
+    // ------------------------------------------------------------------
+    // Card data
+    // The gateway receives the raw PAN and hashes it (SHA-256 + HMAC-SHA256
+    // with a per-environment secret) before forwarding downstream.
+    // Raw PAN is NEVER written to Kafka, logs, or any persistent store.
+    // ------------------------------------------------------------------
+    string pan_last4       = 1;  // Last 4 digits only — for receipt / display
+    string card_expiry     = 2;  // MM/YY — used for basic validity check only
+    string card_hash       = 3;  // SHA-256(HMAC-SHA256(pan, secret)) — set by
+                                  // SDK/terminal; gateway re-derives and validates
+
+    // ------------------------------------------------------------------
+    // Amount
+    // amount_minor : transaction value in the currency's minor units
+    // e.g. OMR 5.250 → amount_minor = 5250, currency = "OMR"
+    // ------------------------------------------------------------------
+    int64  amount_minor    = 4;
+    string currency        = 5;  // ISO 4217 — e.g. "OMR", "USD", "EUR"
+
+    // ------------------------------------------------------------------
+    // Merchant context
+    // merchant_id is derived from the JWT; clients cannot override it.
+    // The gateway populates it from the JWT claim before Kafka publish.
+    // ------------------------------------------------------------------
+    string merchant_id     = 6;  // Read-only: populated from JWT by gateway
+    string mcc             = 7;  // ISO 18245 — merchant category code
+
+    // ------------------------------------------------------------------
+    // Transaction classification
+    // ------------------------------------------------------------------
+    TransactionType transaction_type = 8;
+    Channel         channel          = 9;
+
+    // ------------------------------------------------------------------
+    // Terminal (sent by the client device — gateway cannot derive this)
+    // ------------------------------------------------------------------
+    string terminal_id     = 11; // POS terminal ID or PG session ID
+
+    // ------------------------------------------------------------------
+    // Idempotency
+    // Clients MUST supply a unique idempotency_key per logical transaction.
+    // The gateway rejects duplicate keys within a 24-hour window (HTTP 409
+    // / gRPC ALREADY_EXISTS) and returns the original TransactionAck.
+    // Recommended: UUID v4 generated by the client.
+    // ------------------------------------------------------------------
+    string idempotency_key = 10;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SubmitTransaction — response
+// ─────────────────────────────────────────────────────────────────────────────
+
+message TransactionAck {
+
+    // UUID v4 assigned by the gateway.  Use this in GetTransactionStatus.
+    string txn_id          = 1;
+
+    // Always PENDING immediately after submission.
+    // Fraud decision is asynchronous; poll GetTransactionStatus for the result.
+    TransactionStatus status = 2;
+
+    // Server-assigned ISO 8601 timestamp (UTC) of when the event was
+    // published to Kafka.  Useful for client-side latency tracking.
+    string submitted_at    = 3;  // e.g. "2025-08-15T09:31:00.123Z"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GetTransactionStatus — request / response
+// ─────────────────────────────────────────────────────────────────────────────
+
+message StatusRequest {
+    string txn_id = 1;  // UUID v4 returned by SubmitTransaction
+}
+
+message TransactionStatusResponse {
+    string            txn_id          = 1;
+    TransactionStatus status          = 2;
+
+    // Populated only when status is APPROVED or DECLINED.
+    // Empty string when status is PENDING or ERROR.
+    string            fraud_decision   = 3;  // "APPROVE" | "DECLINE" | "REVIEW"
+    int32             risk_score       = 4;  // 100–1000; 0 when status is PENDING
+
+    // ISO 8601 UTC timestamps
+    string            submitted_at     = 5;
+    string            decided_at       = 6;  // Empty when status is PENDING
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum TransactionStatus {
+    TRANSACTION_STATUS_UNSPECIFIED = 0;
+    PENDING                        = 1;  // Submitted; awaiting fraud decision
+    APPROVED                       = 2;  // Fraud engine approved
+    DECLINED                       = 3;  // Fraud engine declined
+    REVIEW                         = 4;  // Flagged for manual review
+    ERROR                          = 5;  // Processing error; retry safe
+}
+
+// TransactionType and Channel are redeclared per-package (schema registry
+// independence — each protobuf package is self-contained).
+
+enum TransactionType {
+    TRANSACTION_TYPE_UNSPECIFIED = 0;
+    SALES                        = 1;
+    VOID                         = 2;
+    REFUND                       = 3;
+    REVERSAL                     = 4;
+}
+
+enum Channel {
+    CHANNEL_UNSPECIFIED = 0;
+    POS                 = 1;  // Point-of-sale terminal
+    PG                  = 2;  // Payment gateway (e-commerce)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Error details (returned via gRPC status details / google.rpc.Status)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// gRPC status codes used by GatewayService:
+//
+//   INVALID_ARGUMENT    — malformed request (bad currency, negative amount …)
+//   UNAUTHENTICATED     — missing or invalid JWT
+//   PERMISSION_DENIED   — merchant_id in JWT does not match request
+//   ALREADY_EXISTS      — duplicate idempotency_key within 24 h window
+//   NOT_FOUND           — txn_id unknown or expired (GetTransactionStatus)
+//   RESOURCE_EXHAUSTED  — rate limit exceeded for this merchant
+//   INTERNAL            — unexpected server error (safe to retry with backoff)
+//   UNAVAILABLE         — Kafka or Redis temporarily unreachable (retry)
+//
+// All error responses include a google.rpc.ErrorInfo detail message with:
+//   reason   : machine-readable error code (e.g. "DUPLICATE_IDEMPOTENCY_KEY")
+//   domain   : "sentinelswitch.gateway.v1"
+//   metadata : relevant context (e.g. {original_txn_id: "…"} for ALREADY_EXISTS)
+// ─────────────────────────────────────────────────────────────────────────────

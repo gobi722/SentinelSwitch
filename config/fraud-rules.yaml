@@ -1,0 +1,348 @@
+# =============================================================================
+# SentinelSwitch — Fraud Engine Rule Configuration
+# Ticket  : CREDO-ALERT-001
+# Owner   : Fraud Engine (fraud-engine service)
+# Reload  : Hot-reload supported — file-watcher triggers rule cache refresh
+#           without restart. Changes take effect within 30 s.
+# =============================================================================
+#
+# Rule evaluation order (req.txt Step 3.1 → 3.2 → 3.3 → 3.4):
+#   1. Rule Engine  — fast synchronous checks (this file, section: rules)
+#   2. Velocity     — Redis time-window counters (this file, section: velocity)
+#   3. Feature prep — build feature vector for Risk Service gRPC call
+#   4. Risk Service — returns risk_score + decision
+#   5. Final merge  — triggered_rules + risk_score → Decision
+#
+# Decision thresholds (req.txt):
+#   risk_score < 400   → APPROVE
+#   400 ≤ score ≤ 700  → REVIEW
+#   score > 700        → DECLINE
+#
+# A triggered rule does NOT block the transaction by itself.
+# Rules contribute score_contribution to the feature vector sent to Risk Service.
+# The Risk Service weights them and returns the final numeric score.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# DECISION THRESHOLDS
+# -----------------------------------------------------------------------------
+decision_thresholds:
+  approve_below: 400
+  review_from:   400
+  review_to:     700
+  decline_above: 700
+
+# -----------------------------------------------------------------------------
+# CIRCUIT BREAKER — Risk Service (gRPC)
+# req.txt Failure Case 2: Risk Service down → use fallback score
+# -----------------------------------------------------------------------------
+circuit_breaker:
+  failure_threshold:     5       # open circuit after 5 consecutive failures
+  success_threshold:     2       # close circuit after 2 consecutive successes
+  timeout_ms:            500     # gRPC call timeout — fail fast
+  open_duration_ms:      15000   # wait 15 s before half-open probe
+  fallback_risk_score:   600     # conservative REVIEW score used when circuit open
+  fallback_decision:     REVIEW  # never auto-DECLINE on a circuit-open scenario
+
+  # Observability — emitted whenever circuit state transitions or fallback is used
+  alerting:
+    # Prometheus metrics emitted by Fraud Engine
+    metrics:
+      - name: sentinel_cb_state_transitions_total
+        labels: [from_state, to_state]   # e.g. CLOSED→OPEN, OPEN→HALF_OPEN
+        description: Counter incremented on every circuit breaker state change
+      - name: sentinel_cb_fallback_decisions_total
+        labels: [txn_id]
+        description: Counter incremented every time a fallback REVIEW is issued (circuit OPEN)
+      - name: sentinel_cb_open_duration_seconds
+        description: Gauge — seconds elapsed since circuit entered OPEN state
+
+    # Structured log fields emitted on every state transition (JSON log)
+    log_fields:
+      - circuit_state          # CLOSED | OPEN | HALF_OPEN
+      - consecutive_failures   # integer count at transition time
+      - fallback_used          # true | false
+      - risk_service_error     # last gRPC error string when opening
+
+    # Alerting rule hint for Prometheus Alertmanager (configure in prometheus.yml)
+    # Alert fires if circuit stays OPEN for more than 30 s
+    alert_hint:
+      expr: "sentinel_cb_open_duration_seconds > 30"
+      severity: critical
+      summary: "RiskService circuit breaker OPEN — all fraud decisions falling back to REVIEW"
+
+# -----------------------------------------------------------------------------
+# RULE ENGINE — Synchronous Rule Checks (Step 3.1)
+#
+# Each rule has:
+#   id              : unique key — also written to triggered_rules[] in event
+#   description     : human-readable explanation
+#   enabled         : toggle without config deploy
+#   score_contribution: added to the weighted feature vector for Risk Service
+#                       range 0–1000; partial contributions stack
+# -----------------------------------------------------------------------------
+rules:
+
+  # ---------------------------------------------------------------------------
+  # Amount-based rules
+  # ---------------------------------------------------------------------------
+  - id: HIGH_AMOUNT
+    description: Transaction amount exceeds per-currency threshold
+    enabled: true
+    score_contribution: 200
+    condition:
+      type: amount_threshold
+      # Thresholds in minor currency units
+      # OMR: 3 decimal places → 500 OMR = 500000 minor
+      # INR: 2 decimal places → 50000 INR = 5000000 minor
+      # USD: 2 decimal places → 5000 USD = 500000 minor
+      thresholds:
+        OMR: 500000    # 500.000 OMR
+        INR: 5000000   # 50,000 INR
+        USD: 500000    # 5,000 USD
+        AED: 1837500   # 5,000 USD equivalent
+        SAR: 1875000   # 5,000 USD equivalent
+        BHD: 188500    # 500 USD equivalent (BHD = ~2.65 USD)
+        KWD: 153000    # 500 USD equivalent (KWD = ~3.27 USD)
+        DEFAULT: 500000 # fallback for unlisted currencies — conservative
+
+  - id: ROUND_AMOUNT
+    description: Suspiciously round large amount (common in structuring attacks)
+    enabled: true
+    score_contribution: 80
+    condition:
+      type: round_amount
+      # Triggers if amount_minor is divisible by 100000 (i.e. ends in exactly 3+ zeros)
+      # AND amount_minor > round_amount_min_minor
+      divisible_by: 100000
+      min_minor: 100000    # only flag amounts ≥ 1 OMR / 1 USD (avoid noise on micro-txns)
+
+  # ---------------------------------------------------------------------------
+  # Merchant Category (MCC) rules
+  # ---------------------------------------------------------------------------
+  - id: RISKY_MCC
+    description: Transaction at high-risk merchant category
+    enabled: true
+    score_contribution: 150
+    condition:
+      type: mcc_list
+      # ISO 18245 MCC codes considered high-risk
+      mcc_codes:
+        - "7995"  # Betting / Gambling
+        - "7994"  # Video Game Arcades / Amusement Arcades
+        - "5999"  # Miscellaneous and Specialty Retail — catch-all
+        - "6011"  # ATM Cash Advances — Automated Teller Machines
+        - "6010"  # Manual Cash Disbursements
+        - "4829"  # Wire Transfer — Money Orders
+        - "6051"  # Non-Financial Institutions — Foreign Currency / Money Orders
+        - "7273"  # Dating / Escort Services
+        - "5912"  # Drug Stores / Pharmacies (flag only; low contribution)
+        - "5999"  # Miscellaneous retail — frequently abused
+
+  - id: CRYPTO_EXCHANGE_MCC
+    description: Transaction at cryptocurrency exchange or digital asset platform
+    enabled: true
+    score_contribution: 120
+    condition:
+      type: mcc_list
+      mcc_codes:
+        - "6051"  # Non-Financial Institutions (often used by crypto exchanges)
+        - "6099"  # Financial Institutions — not elsewhere classified
+
+  # ---------------------------------------------------------------------------
+  # Time-based rules
+  # ---------------------------------------------------------------------------
+  - id: NIGHT_TRANSACTION
+    description: Transaction during low-activity hours (local cardholder time)
+    enabled: true
+    score_contribution: 60
+    condition:
+      type: time_window
+      # Uses txn_timestamp UTC. Adjust if timezone enrichment is added later.
+      start_hour_utc: 0   # midnight
+      end_hour_utc:   5   # 05:00 UTC (covers 23:00–03:00 for Gulf region, UTC+3..+4)
+
+  - id: WEEKEND_HIGH_AMOUNT
+    description: High-value transaction on weekend combined with HIGH_AMOUNT rule
+    enabled: true
+    score_contribution: 40
+    condition:
+      type: composite
+      # Only adds contribution when BOTH conditions are true:
+      #   1. day_of_week is Saturday or Sunday (UTC)
+      #   2. HIGH_AMOUNT rule has already triggered
+      requires_rules: [HIGH_AMOUNT]
+      day_of_week: [SATURDAY, SUNDAY]
+
+  # ---------------------------------------------------------------------------
+  # Channel / Scheme rules
+  # ---------------------------------------------------------------------------
+  - id: CARD_NOT_PRESENT
+    description: Payment Gateway (online / CNP) transaction — higher fraud rate
+    enabled: true
+    score_contribution: 50
+    condition:
+      type: channel_match
+      channels: [PG]
+
+  - id: FOREIGN_CURRENCY
+    description: Transaction currency does not match expected domestic currencies
+    enabled: true
+    score_contribution: 70
+    condition:
+      type: currency_not_in
+      # Domestic currencies for this deployment (Oman/GCC focus)
+      domestic_currencies: [OMR, AED, SAR, BHD, KWD, QAR]
+
+# =============================================================================
+# VELOCITY ENGINE — Redis Time-Window Checks (Step 3.2)
+#
+# Each velocity rule queries a Redis sorted set keyed by card_hash.
+# The sorted set score is the Unix timestamp; members are txn_ids.
+# ZRANGEBYSCORE is used to count events within the time window.
+#
+# Key pattern: velocity:count:{rule_id}:{card_hash}   — sorted set of txn timestamps (count-based rules)
+#              velocity:amount:{rule_id}:{card_hash}  — sorted set + companion HASH for amount-based rules
+# TTL         : set to window_seconds + 60 s buffer on every write (sliding window)
+#
+# contributed_fields: list of feature vector fields this rule populates
+#   (passed to Risk Service gRPC as part of FraudFeatures)
+# =============================================================================
+velocity:
+
+  - id: TXN_COUNT_1MIN
+    description: Number of transactions on same card in last 60 seconds
+    enabled: true
+    window_seconds: 60
+    # If card has ≥ threshold transactions in window → trigger
+    threshold: 5
+    score_contribution: 250   # High weight — rapid-fire is a strong fraud signal
+    contributed_field: txn_count_1min
+
+  - id: TXN_COUNT_5MIN
+    description: Number of transactions on same card in last 5 minutes
+    enabled: true
+    window_seconds: 300
+    threshold: 10
+    score_contribution: 150
+    contributed_field: txn_count_5min
+
+  - id: TXN_COUNT_1HR
+    description: Number of transactions on same card in last 60 minutes
+    enabled: true
+    window_seconds: 3600
+    threshold: 20
+    score_contribution: 80
+    contributed_field: txn_count_1hr
+
+  - id: AMOUNT_SUM_1MIN
+    description: Total amount (minor units) spent on same card in last 60 seconds
+    enabled: true
+    window_seconds: 60
+    # Threshold in minor units — 100 OMR = 100000 minor
+    threshold_minor: 100000
+    score_contribution: 200
+    contributed_field: amount_sum_1min
+
+  - id: AMOUNT_SUM_1HR
+    description: Total amount (minor units) spent on same card in last 60 minutes
+    enabled: true
+    window_seconds: 3600
+    threshold_minor: 1000000   # 1000 OMR
+    score_contribution: 100
+    contributed_field: amount_sum_1hr
+
+  - id: UNIQUE_MERCHANTS_5MIN
+    description: Number of distinct merchants used by same card in last 5 minutes
+    enabled: true
+    window_seconds: 300
+    threshold: 3
+    score_contribution: 180
+    contributed_field: unique_merchants_5min
+    # Implementation note: use a Redis HyperLogLog per card per window
+    # Key: hll:merchants:{card_hash}:{window_bucket}
+
+  - id: UNIQUE_TERMINALS_5MIN
+    description: Number of distinct terminals used by same card in last 5 minutes
+    enabled: true
+    window_seconds: 300
+    threshold: 4
+    score_contribution: 120
+    contributed_field: unique_terminals_5min
+
+# =============================================================================
+# MERCHANT RISK SCORES
+# Pre-computed risk scores per merchant_id for the feature vector.
+# Risk Service uses merchant_risk as an input feature.
+# Updated daily via batch job — loaded from DB into Redis hash at startup.
+#
+# Format: merchant_risk_scores[merchant_id] = float 0.0–1.0
+#         0.0 = trusted merchant
+#         1.0 = highest risk
+#
+# Default for unknown merchants: 0.5 (neutral / unclassified)
+# Redis key: merchant_risk:{merchant_id}
+# =============================================================================
+merchant_risk:
+  default_unknown: 0.5
+  # Static overrides for demo / testing — production values come from DB batch
+  static_overrides:
+    M_TRUSTED_001: 0.05
+    M_TRUSTED_002: 0.10
+    M_RISKY_001:   0.90
+    M_RISKY_002:   0.85
+
+# =============================================================================
+# FEATURE VECTOR DEFINITION
+# Fields sent to Risk Service (proto: RiskRequest.features)
+# Fraud Engine assembles this map after Rule + Velocity checks.
+# =============================================================================
+feature_vector:
+  fields:
+    - name: amount_minor
+      source: transaction
+      description: Raw transaction amount in minor currency units
+
+    - name: txn_count_1min
+      source: velocity:TXN_COUNT_1MIN
+      description: Transactions by same card in last 60 s
+
+    - name: txn_count_5min
+      source: velocity:TXN_COUNT_5MIN
+      description: Transactions by same card in last 5 min
+
+    - name: txn_count_1hr
+      source: velocity:TXN_COUNT_1HR
+      description: Transactions by same card in last 60 min
+
+    - name: amount_sum_1min
+      source: velocity:AMOUNT_SUM_1MIN
+      description: Total spend by same card in last 60 s (minor units)
+
+    - name: amount_sum_1hr
+      source: velocity:AMOUNT_SUM_1HR
+      description: Total spend by same card in last 60 min (minor units)
+
+    - name: unique_merchants_5min
+      source: velocity:UNIQUE_MERCHANTS_5MIN
+      description: Distinct merchants used by same card in last 5 min
+
+    - name: unique_terminals_5min
+      source: velocity:UNIQUE_TERMINALS_5MIN
+      description: Distinct terminals used by same card in last 5 min
+
+    - name: merchant_risk
+      source: merchant_risk:{merchant_id}
+      description: Pre-computed merchant risk score (0.0–1.0)
+
+    - name: is_night
+      source: rule:NIGHT_TRANSACTION
+      description: 1 if NIGHT_TRANSACTION triggered, 0 otherwise
+
+    - name: is_risky_mcc
+      source: rule:RISKY_MCC
+      description: 1 if RISKY_MCC triggered, 0 otherwise
+
+    - name: is_card_not_present
+      source: rule:CARD_NOT_PRESENT
+      description: 1 if CNP channel, 0 if POS

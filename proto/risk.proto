@@ -1,0 +1,189 @@
+// =============================================================================
+// SentinelSwitch — gRPC Service Contract
+// Service : RiskService
+// Ticket  : CREDO-ALERT-001
+// Fix     : amount changed from double → int64 (minor units) to avoid
+//           floating-point representation errors on amounts like OMR 5.250
+// Ticket  : CREDO-ALERT-002
+// Fix     : RiskRequest.features (FraudFeatures) added to carry the full
+//           11-field feature vector defined in fraud-rules.yaml.
+//           Fields 7–9 (velocity_window / velocity_count / velocity_amount)
+//           are superseded and reserved; they modelled only a single velocity
+//           window which is insufficient for multi-window risk scoring.
+// =============================================================================
+
+syntax = "proto3";
+
+package sentinel.risk.v1;
+
+option java_package         = "com.sentinelswitch.risk.v1";
+option java_outer_classname = "RiskProto";
+option java_multiple_files  = true;
+option go_package           = "github.com/sentinelswitch/proto/risk/v1";
+
+// Called by  : Fraud Engine (synchronous, within fraud decision window)
+// Served by  : Risk Service
+// SLA        : P99 < 50ms (budget reserved within overall 200ms txn SLA)
+
+service RiskService {
+    rpc CalculateRisk (RiskRequest) returns (RiskResponse);
+}
+
+message RiskRequest {
+
+    // ------------------------------------------------------------------
+    // Transaction identity
+    // ------------------------------------------------------------------
+    string txn_id            = 1;  // UUID v4 — for correlation in logs
+
+    // ------------------------------------------------------------------
+    // Card (hashed — no raw PAN crosses service boundary)
+    // ------------------------------------------------------------------
+    string card_hash         = 2;
+
+    // ------------------------------------------------------------------
+    // Amount (minor currency units — avoids float rounding)
+    // e.g. OMR 5.250 → amount_minor = 5250, currency = "OMR"
+    // ------------------------------------------------------------------
+    int64  amount_minor      = 3;
+    string currency          = 4;  // ISO 4217
+
+    // ------------------------------------------------------------------
+    // Merchant context
+    // ------------------------------------------------------------------
+    string merchant_id       = 5;
+    string mcc               = 6;  // ISO 18245
+
+    // ------------------------------------------------------------------
+    // RESERVED — superseded by FraudFeatures.features (field 12)
+    //
+    // Fields 7–9 originally modelled a single velocity window.
+    // fraud-rules.yaml feature_vector requires multi-window counts/amounts;
+    // a single (window, count, amount) triple is insufficient.
+    // Do NOT reuse field numbers 7, 8, 9.
+    // ------------------------------------------------------------------
+    reserved 7, 8, 9;
+    reserved "velocity_window", "velocity_count", "velocity_amount";
+
+    // ------------------------------------------------------------------
+    // Classification (context for rule evaluation)
+    // ------------------------------------------------------------------
+    TransactionType transaction_type = 10;
+    Channel         channel          = 11;
+
+    // ------------------------------------------------------------------
+    // Full feature vector — assembled by Fraud Engine after Step 3.1–3.3
+    //
+    // Sources (see fraud-rules.yaml § feature_vector):
+    //   • Velocity counters  : Redis sorted sets / HyperLogLog
+    //   • Merchant risk score: Redis string  merchant_risk:{merchant_id}
+    //   • Rule flags         : output of Step 3.1 rule evaluation
+    //
+    // All counts exclude the current transaction (prior txns only).
+    // All amounts are in minor currency units (same unit as amount_minor).
+    // ------------------------------------------------------------------
+    FraudFeatures features = 12;
+}
+
+// ------------------------------------------------------------------
+// Enums — redeclared per-package (schema registry independence)
+// ------------------------------------------------------------------
+
+enum TransactionType {
+    TRANSACTION_TYPE_UNSPECIFIED = 0;
+    SALES                        = 1;
+    VOID                         = 2;
+    REFUND                       = 3;
+    REVERSAL                     = 4;
+}
+
+enum Channel {
+    CHANNEL_UNSPECIFIED = 0;
+    POS                 = 1;
+    PG                  = 2;
+}
+
+// ------------------------------------------------------------------
+// FraudFeatures — full feature vector forwarded to Risk Service.
+//
+// Assembled by Fraud Engine after Steps 3.1 (rules) + 3.2 (velocity).
+// All velocity fields are populated via Redis queries BEFORE the gRPC
+// call; the Risk Service must not re-query Redis.
+//
+// Velocity Redis sources (card:{card_hash}:txns sorted set, score=epoch-ms):
+//   txn_count_*   → ZCOUNT  key (now_ms - window_ms) now_ms
+//   amount_sum_*  → companion HASH (see fraud-rules.yaml § velocity)
+//   unique_merchants_5min → HyperLogLog  hll:merchants:{card_hash}:{bucket}
+//   unique_terminals_5min → HyperLogLog  hll:terminals:{card_hash}:{bucket}
+//                           (±0.81 % std-err accepted for both — Gap 6 resolved)
+// ------------------------------------------------------------------
+message FraudFeatures {
+
+    // ---- Velocity counts (prior transactions only, current excluded) ----
+    int32  txn_count_1min       = 1;   // transactions in last 60 s
+    int32  txn_count_5min       = 2;   // transactions in last 5 min
+    int32  txn_count_1hr        = 3;   // transactions in last 60 min
+
+    // ---- Velocity amounts (minor currency units) ----
+    int64  amount_sum_1min      = 4;   // spend in last 60 s
+    int64  amount_sum_1hr       = 5;   // spend in last 60 min
+
+    // ---- Cardinality (HyperLogLog — approximate, ±0.81% std-err accepted) ----
+    int32  unique_merchants_5min  = 6;  // distinct merchants in last 5 min
+    int32  unique_terminals_5min  = 11; // distinct terminals in last 5 min
+
+    // ---- Merchant risk (pre-computed score, loaded from DB → Redis) ----
+    // Source : merchant_risk:{merchant_id}   TTL: 86400 s
+    // Default: 0.5 if key absent (unknown / unclassified merchant)
+    // Range  : 0.0 (trusted) → 1.0 (highest risk)
+    double merchant_risk        = 7;
+
+    // ---- Binary rule flags (0 = not triggered, 1 = triggered) ----
+    int32  is_night             = 8;   // 1 if NIGHT_TRANSACTION rule fired
+    int32  is_risky_mcc         = 9;   // 1 if RISKY_MCC rule fired
+    int32  is_card_not_present  = 10;  // 1 if channel == PG (card-not-present)
+}
+
+// ------------------------------------------------------------------
+// VelocityWindow — retained for internal tooling / monitoring use.
+// No longer forwarded in RiskRequest (superseded by FraudFeatures).
+//
+// Window constants (milliseconds):
+//   WINDOW_1MIN =     60 000
+//   WINDOW_5MIN =    300 000
+//   WINDOW_1H   =  3 600 000
+// ------------------------------------------------------------------
+enum VelocityWindow {
+    VELOCITY_WINDOW_UNSPECIFIED = 0;
+    WINDOW_1MIN                 = 1;  // 60 seconds  — spike detection
+    WINDOW_5MIN                 = 2;  // 5 minutes   — short burst detection
+    WINDOW_1H                   = 3;  // 1 hour      — standard velocity
+}
+
+message RiskResponse {
+
+    // ------------------------------------------------------------------
+    // Score: 100 (lowest risk) → 1000 (highest risk)
+    // Bands: 100–399 APPROVE | 400–700 REVIEW | 701–1000 DECLINE
+    //        (aligns with fraud-rules.yaml: approve_below=400, decline_above=700
+    //         i.e. score > 700 → DECLINE; score = 700 → REVIEW)
+    // ------------------------------------------------------------------
+    int32  risk_score        = 1;
+
+    // ------------------------------------------------------------------
+    // Decision derived from score band
+    // ------------------------------------------------------------------
+    Decision decision        = 2;
+
+    // ------------------------------------------------------------------
+    // Rules that contributed to this score
+    // ------------------------------------------------------------------
+    repeated string triggered_rules = 3;  // e.g. ["HIGH_AMOUNT", "VELOCITY_SPIKE"]
+}
+
+enum Decision {
+    DECISION_UNSPECIFIED = 0;
+    APPROVE              = 1;
+    DECLINE              = 2;
+    REVIEW               = 3;
+}

@@ -1,0 +1,190 @@
+# =============================================================================
+# SentinelSwitch — API Gateway Service Configuration
+# Ticket  : CREDO-ALERT-001
+# Service : api-gateway
+# Role    : Entry point — validates, deduplicates, publishes to Kafka, returns ACK
+# =============================================================================
+#
+# Runtime flow (req.txt Step 1):
+#   1. Receive SubmitTransaction gRPC request from client
+#   2. Validate fields (amount, card, currency, mcc)
+#   3. Hash PAN → card_hash (HMAC-SHA256)
+#   4. Generate txn_id (UUID v4)
+#   5. Idempotency check → Redis DB1 (key: idempotency:{txn_id})
+#   6. Publish TransactionEvent to Kafka topic: transactions
+#   7. Return TransactionAck immediately (non-blocking)
+#
+# Client may then poll GetTransactionStatus(txn_id) for the fraud result.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SERVER — gRPC
+# -----------------------------------------------------------------------------
+server:
+  grpc:
+    host: ${GATEWAY_GRPC_HOST:-0.0.0.0}
+    port: ${GATEWAY_GRPC_PORT:-50051}
+
+    tls:
+      enabled: ${GATEWAY_TLS_ENABLED:-false}
+      cert_file: ${GATEWAY_TLS_CERT:-/etc/ssl/certs/gateway.crt}
+      key_file:  ${GATEWAY_TLS_KEY:-/etc/ssl/private/gateway.key}
+
+    # gRPC keepalive — prevents stale connections at load balancer / firewall
+    keepalive:
+      max_connection_idle_ms:    300000   # 5 min — idle client connections closed
+      max_connection_age_ms:    1800000   # 30 min — force reconnect for rolling updates
+      keepalive_time_ms:         60000    # send PING if no activity for 60 s
+      keepalive_timeout_ms:      10000    # close if no PONG within 10 s
+
+    # Max inbound message size — TransactionEvent payload is well under 4 KB;
+    # 1 MB limit guards against abuse.
+    max_recv_msg_size_bytes: 1048576   # 1 MB
+    max_send_msg_size_bytes: 1048576   # 1 MB
+
+  # HTTP /metrics endpoint — scraped by Prometheus
+  metrics:
+    host: ${GATEWAY_METRICS_HOST:-0.0.0.0}
+    port: ${GATEWAY_METRICS_PORT:-9091}
+    path: /metrics
+
+  # HTTP /healthz endpoint — used by Kubernetes liveness / readiness probes
+  health:
+    host: ${GATEWAY_HEALTH_HOST:-0.0.0.0}
+    port: ${GATEWAY_HEALTH_PORT:-8081}
+    liveness_path:  /healthz
+    readiness_path: /readyz
+
+# -----------------------------------------------------------------------------
+# PAN HASHING — SHA-256 + HMAC-SHA256
+# Raw PAN never leaves the API Gateway.
+# card_hash = HMAC-SHA256(SHA-256(pan), PAN_HASH_SECRET)
+# Output: hex-encoded 64-char string.
+# -----------------------------------------------------------------------------
+pan_hashing:
+  algorithm: hmac_sha256
+  # Secret loaded from environment — never hardcode
+  secret_env: PAN_HASH_SECRET   # required; service refuses to start if unset
+  # Masked PAN stored for display: first 6 + last 4 digits, middle replaced with X
+  # e.g. 4111111111111111 → 411111XXXXXX1111
+  masked_pan_prefix_digits: 6
+  masked_pan_suffix_digits: 4
+  mask_char: X
+
+# -----------------------------------------------------------------------------
+# IDEMPOTENCY — Redis DB 1
+# Prevents duplicate TransactionEvents reaching Kafka.
+# Key    : idempotency:{txn_id}    Value: "1"    TTL: 86400 s (24 h)
+# Atomic : SET NX EX — check-and-set in one command
+# -----------------------------------------------------------------------------
+idempotency:
+  redis_db: 1                    # matches redis.yaml databases.idempotency
+  key_prefix: idempotency
+  ttl_seconds: 86400             # 24-hour deduplication window
+  # If Redis is unreachable: allow-through (log + metric) rather than reject.
+  # Persistence Service upsert handles duplicates at DB level as a safety net.
+  on_redis_unavailable: allow_through
+  # Metric emitted when Redis is unavailable and allow-through fires:
+  #   sentinel_idempotency_redis_miss_total (counter)
+
+# -----------------------------------------------------------------------------
+# KAFKA PRODUCER
+# Publishes TransactionEvent to topic: transactions
+# Partition key: card_hash — all events for same card go to same partition.
+# -----------------------------------------------------------------------------
+kafka:
+  brokers: ${KAFKA_BROKERS:-localhost:9092}    # comma-separated list
+  topic: transactions
+
+  producer:
+    # Serialization
+    value_serializer: protobuf
+    schema_registry_url: ${SCHEMA_REGISTRY_URL:-http://localhost:8081}
+    schema_subject: transactions-value         # subject in schema registry
+
+    # Delivery guarantees (mirrors kafka-topics.yaml producer_defaults)
+    acks: all                        # wait for all ISR replicas
+    enable_idempotence: true         # exactly-once at producer level
+    retries: 2147483647              # retry until delivery_timeout_ms
+    delivery_timeout_ms: 30000       # 30 s hard cap per produce attempt
+
+    # Throughput tuning
+    linger_ms: 5                     # batch for up to 5 ms
+    batch_size_bytes: 65536          # 64 KB batch
+    compression_type: lz4            # best latency/ratio for small binary msgs
+
+    # Metadata
+    client_id: sentinel-api-gateway
+
+# -----------------------------------------------------------------------------
+# VALIDATION — field-level checks applied before any processing
+# Requests failing validation are rejected immediately with INVALID_ARGUMENT.
+# -----------------------------------------------------------------------------
+validation:
+  # Amount
+  amount_min_minor: 1              # reject zero / negative amounts
+  amount_max_minor: 999999999999   # ~1B OMR — sanity upper bound
+
+  # Supported currencies (ISO 4217)
+  supported_currencies:
+    - OMR
+    - INR
+    - USD
+    - AED
+    - SAR
+    - BHD
+    - KWD
+    - QAR
+
+  # Supported transaction types
+  supported_transaction_types:
+    - sales
+    - refund
+    - void
+    - auth
+
+  # Supported channels
+  supported_channels:
+    - pos
+    - pg         # Payment Gateway (card-not-present)
+    - atm
+    - moto       # Mail Order / Telephone Order
+
+  # MCC — must be exactly 4 digits (ISO 18245)
+  mcc_pattern: "^[0-9]{4}$"
+
+  # terminal_id — alphanumeric, up to 16 chars
+  terminal_id_max_length: 16
+
+  # merchant_id — alphanumeric, up to 20 chars
+  merchant_id_max_length: 20
+
+  # RRN — exactly 12 numeric digits
+  rrn_pattern: "^[0-9]{12}$"
+
+# -----------------------------------------------------------------------------
+# RATE LIMITING
+# Per-client IP rate limit — protects against request floods.
+# Uses token-bucket algorithm (in-memory, per gateway replica).
+# -----------------------------------------------------------------------------
+rate_limiting:
+  enabled: ${RATE_LIMITING_ENABLED:-true}
+  # Max requests per second per client IP
+  requests_per_second: 100
+  # Burst allowance — allows short spikes above rps limit
+  burst: 200
+  # Header to read client identity from (falls back to remote IP)
+  identity_header: X-Client-ID
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# Structured JSON logs. Level controlled by env var for runtime override.
+# -----------------------------------------------------------------------------
+logging:
+  level: ${LOG_LEVEL:-info}        # debug | info | warn | error
+  format: json
+  # Fields included in every log line
+  default_fields:
+    service: api-gateway
+    version: ${SERVICE_VERSION:-unknown}
+    env:     ${DEPLOY_ENV:-local}

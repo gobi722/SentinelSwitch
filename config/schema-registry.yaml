@@ -1,0 +1,78 @@
+# =============================================================================
+# SentinelSwitch — Confluent Schema Registry Configuration
+# Ticket : CREDO-ALERT-001
+# =============================================================================
+
+schema_registry:
+  url: ${SCHEMA_REGISTRY_URL}               # e.g. http://schema-registry:8081
+  basic_auth:
+    user_info: ${SCHEMA_REGISTRY_API_KEY}:${SCHEMA_REGISTRY_API_SECRET}
+
+# -----------------------------------------------------------------------------
+# Subject naming strategy : TopicNameStrategy (Confluent default)
+#   Key subject   : <topic>-key
+#   Value subject : <topic>-value
+# -----------------------------------------------------------------------------
+
+subjects:
+
+  # ---------------------------------------------------------------------------
+  # Topic: transactions
+  # Producer: API Gateway
+  # Consumer: Fraud Engine
+  # ---------------------------------------------------------------------------
+  transactions-value:
+    schema_type: PROTOBUF
+    schema_file: proto/transactions.proto
+    compatibility: BACKWARD
+    # BACKWARD means new schema can read data produced with previous schema.
+    # Safe for adding optional fields with defaults.
+
+  # ---------------------------------------------------------------------------
+  # Topic: fraud_results
+  # Producer: Fraud Engine
+  # Consumer: Persistence Service
+  # ---------------------------------------------------------------------------
+  fraud_results-value:
+    schema_type: PROTOBUF
+    schema_file: proto/fraud_results.proto
+    compatibility: BACKWARD
+
+# -----------------------------------------------------------------------------
+# Registration script usage (Confluent CLI):
+#
+#   confluent schema-registry schema create \
+#     --subject transactions-value \
+#     --schema proto/transactions.proto \
+#     --schema-type PROTOBUF
+#
+#   confluent schema-registry schema create \
+#     --subject fraud_results-value \
+#     --schema proto/fraud_results.proto \
+#     --schema-type PROTOBUF
+#
+# Check compatibility before promoting to PROD:
+#
+#   confluent schema-registry schema describe \
+#     --subject transactions-value --version latest
+#
+#   confluent schema-registry compatibility validate \
+#     --subject transactions-value \
+#     --schema proto/transactions.proto \
+#     --schema-type PROTOBUF
+# -----------------------------------------------------------------------------
+
+# -----------------------------------------------------------------------------
+# Kafka producer / consumer serializer settings (Java example)
+# -----------------------------------------------------------------------------
+# producer:
+#   key.serializer:   org.apache.kafka.common.serialization.StringSerializer
+#   value.serializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufSerializer
+#   schema.registry.url: ${SCHEMA_REGISTRY_URL}
+#
+# consumer:
+#   key.deserializer:   org.apache.kafka.common.serialization.StringDeserializer
+#   value.deserializer: io.confluent.kafka.serializers.protobuf.KafkaProtobufDeserializer
+#   schema.registry.url: ${SCHEMA_REGISTRY_URL}
+#   specific.protobuf.value.type: com.sentinelswitch.transactions.v1.TransactionEvent
+# -----------------------------------------------------------------------------
