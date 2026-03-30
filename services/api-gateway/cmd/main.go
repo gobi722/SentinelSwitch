@@ -76,6 +76,7 @@ func main() {
 	}
 	cancel()
 
+	
 	// Kafka producer
 	producer := kafka.New(kafka.ProducerConfig{
 		Brokers:           cfg.Kafka.Brokers,
