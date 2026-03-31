@@ -4,6 +4,7 @@ go 1.22.0
 
 require (
 	github.com/jackc/pgx/v5 v5.5.4
+	github.com/joho/godotenv v1.5.1
 	github.com/prometheus/client_golang v1.19.0
 	github.com/segmentio/kafka-go v0.4.47
 	github.com/sentinelswitch/proto v0.0.0

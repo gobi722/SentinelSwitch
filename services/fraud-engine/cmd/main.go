@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sentinelswitch/fraud-engine/internal/circuitbreaker"
 	"github.com/sentinelswitch/fraud-engine/internal/config"
@@ -20,9 +21,10 @@ import (
 )
 
 func main() {
+	godotenv.Load(".env")
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
-		cfgPath = "config/fraud-engine.yaml"
+		cfgPath = "../../../config/fraud-engine.yaml"
 	}
 
 	cfg, err := config.Load(cfgPath)

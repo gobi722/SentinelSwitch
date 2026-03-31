@@ -27,7 +27,8 @@
 # Manual commit: only after successful DB upsert OR DLQ publish
 # -----------------------------------------------------------------------------
 kafka:
-  brokers: ${KAFKA_BROKERS:-localhost:9092}    # comma-separated list
+  brokers:
+    - localhost:9092
 
   consumer:
     group_id: persistence-svc-cg

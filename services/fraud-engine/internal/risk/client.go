@@ -13,8 +13,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-// Client wraps the gRPC RiskService stub with per-call timeout and structured
-// logging.
 type Client struct {
 	stub    riskpb.RiskServiceClient
 	conn    *grpc.ClientConn
@@ -22,11 +20,11 @@ type Client struct {
 	logger  *zap.Logger
 }
 
-// NewClient dials the Risk Service and returns a ready Client.
 func NewClient(cfg *config.Config, logger *zap.Logger) (*Client, error) {
 	addr := fmt.Sprintf("%s:%d", cfg.RiskService.Host, cfg.RiskService.Port)
 
-	conn, err := grpc.NewClient(
+	//nolint:staticcheck // grpc.Dial is deprecated in v1.63+ but works on all versions
+	conn, err := grpc.Dial(
 		addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
@@ -52,8 +50,6 @@ func NewClient(cfg *config.Config, logger *zap.Logger) (*Client, error) {
 	}, nil
 }
 
-// CalculateRisk calls the Risk Service CalculateRisk RPC. The caller is
-// responsible for applying the circuit breaker before invoking this method.
 func (c *Client) CalculateRisk(ctx context.Context, req *riskpb.RiskRequest) (*riskpb.RiskResponse, error) {
 	callCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
@@ -65,7 +61,6 @@ func (c *Client) CalculateRisk(ctx context.Context, req *riskpb.RiskRequest) (*r
 	return resp, nil
 }
 
-// Close closes the underlying gRPC connection.
 func (c *Client) Close() error {
 	return c.conn.Close()
 }

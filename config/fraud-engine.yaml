@@ -26,7 +26,8 @@
 # Manual commit: after rule evaluation + gRPC call + publish to fraud_results
 # -----------------------------------------------------------------------------
 kafka:
-  brokers: ${KAFKA_BROKERS:-localhost:9092}    # comma-separated list
+  brokers:
+    - localhost:9092
 
   consumer:
     group_id: fraud-engine-cg

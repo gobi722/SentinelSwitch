@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	kafkago "github.com/segmentio/kafka-go"
 	"github.com/sentinelswitch/persistence-svc/internal/config"
@@ -20,9 +21,10 @@ import (
 )
 
 func main() {
+	godotenv.Load(".env")
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
-		cfgPath = "config/persistence-svc.yaml"
+		cfgPath = "../../../config/persistence-svc.yaml"
 	}
 
 	cfg, err := config.Load(cfgPath)

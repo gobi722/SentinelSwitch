@@ -25,7 +25,7 @@ import (
 func main() {
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
-		cfgPath = "config/risk-service.yaml"
+		cfgPath = "../../../config/risk-service.yaml"
 	}
 
 	cfg, err := config.Load(cfgPath)
