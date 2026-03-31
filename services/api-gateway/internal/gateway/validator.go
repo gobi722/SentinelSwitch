@@ -1,11 +1,9 @@
-// Package gateway contains the gRPC handler and its supporting types.
 package gateway
 
 import (
 	"fmt"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -14,25 +12,16 @@ import (
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
 )
 
-// Validator applies field-level business rules to SubmitTransactionRequest.
 type Validator struct {
 	cfg        config.ValidationConfig
 	mccRE      *regexp.Regexp
-	rrnRE      *regexp.Regexp
 	currencies map[string]struct{}
-	txnTypes   map[string]struct{}
-	channels   map[string]struct{}
 }
 
-// NewValidator builds a Validator from config.
 func NewValidator(cfg config.ValidationConfig) (*Validator, error) {
 	mccRE, err := regexp.Compile(cfg.MccPattern)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mcc_pattern %q: %w", cfg.MccPattern, err)
-	}
-	rrnRE, err := regexp.Compile(cfg.RRNPattern)
-	if err != nil {
-		return nil, fmt.Errorf("invalid rrn_pattern %q: %w", cfg.RRNPattern, err)
 	}
 
 	toSet := func(ss []string) map[string]struct{} {
@@ -46,16 +35,11 @@ func NewValidator(cfg config.ValidationConfig) (*Validator, error) {
 	return &Validator{
 		cfg:        cfg,
 		mccRE:      mccRE,
-		rrnRE:      rrnRE,
 		currencies: toSet(cfg.SupportedCurrencies),
-		txnTypes:   toSet(cfg.SupportedTransactionTypes),
-		channels:   toSet(cfg.SupportedChannels),
 	}, nil
 }
 
-// ValidateSubmit checks all required fields of a SubmitTransactionRequest.
-// Returns a gRPC INVALID_ARGUMENT status on failure.
-func (v *Validator) ValidateSubmit(req *gatewayv1.SubmitTransactionRequest) error {
+func (v *Validator) ValidateSubmit(req *gatewayv1.TransactionRequest) error {
 	var errs []string
 	add := func(msg string) { errs = append(errs, msg) }
 
@@ -64,21 +48,14 @@ func (v *Validator) ValidateSubmit(req *gatewayv1.SubmitTransactionRequest) erro
 		add("idempotency_key: required")
 	}
 
-	// --- PAN / card data ---
-	pan := strings.ReplaceAll(strings.ReplaceAll(req.Pan, " ", ""), "-", "")
-	if len(pan) < 13 || len(pan) > 19 {
-		add("pan: must be 13–19 digits")
-	} else if !allDigits(pan) {
-		add("pan: must contain digits only")
-	} else if !luhn(pan) {
-		add("pan: failed Luhn check")
+	// --- Card hash (raw PAN never sent — client sends card_hash) ---
+	if strings.TrimSpace(req.CardHash) == "" {
+		add("card_hash: required")
 	}
 
-	if req.ExpiryMonth < 1 || req.ExpiryMonth > 12 {
-		add("expiry_month: must be 1–12")
-	}
-	if req.ExpiryYear < 2024 || req.ExpiryYear > 2099 {
-		add("expiry_year: must be 2024–2099")
+	// --- PAN last4 ---
+	if len(req.PanLast4) != 4 || !allDigits(req.PanLast4) {
+		add("pan_last4: must be exactly 4 digits")
 	}
 
 	// --- Amount ---
@@ -87,36 +64,31 @@ func (v *Validator) ValidateSubmit(req *gatewayv1.SubmitTransactionRequest) erro
 	}
 
 	// --- Currency ---
-	if _, ok := v.currencies[strings.ToUpper(req.CurrencyCode)]; !ok {
-		add(fmt.Sprintf("currency_code: unsupported value %q", req.CurrencyCode))
+	if _, ok := v.currencies[strings.ToUpper(req.Currency)]; !ok {
+		add(fmt.Sprintf("currency: unsupported value %q", req.Currency))
 	}
 
-	// --- Transaction type ---
-	if _, ok := v.txnTypes[strings.ToUpper(req.TransactionType)]; !ok {
-		add(fmt.Sprintf("transaction_type: unsupported value %q", req.TransactionType))
+	// --- Transaction type (enum — 0 means unspecified) ---
+	if req.TransactionType == gatewayv1.TransactionType_TRANSACTION_TYPE_UNSPECIFIED {
+		add("transaction_type: required")
 	}
 
-	// --- Channel ---
-	if _, ok := v.channels[strings.ToUpper(req.Channel)]; !ok {
-		add(fmt.Sprintf("channel: unsupported value %q", req.Channel))
+	// --- Channel (enum — 0 means unspecified) ---
+	if req.Channel == gatewayv1.Channel_CHANNEL_UNSPECIFIED {
+		add("channel: required")
 	}
 
-	// --- MCC ---
-	if req.MerchantCategoryCode != "" && !v.mccRE.MatchString(req.MerchantCategoryCode) {
-		add(fmt.Sprintf("merchant_category_code: does not match pattern %s", v.cfg.MccPattern))
+	// --- MCC (optional but must match pattern if provided) ---
+	if req.Mcc != "" && !v.mccRE.MatchString(req.Mcc) {
+		add(fmt.Sprintf("mcc: does not match pattern %s", v.cfg.MccPattern))
 	}
 
 	// --- Terminal / Merchant IDs ---
-	if utf8.RuneCountInString(req.TerminalId) > v.cfg.TerminalIDMaxLength {
+	if len(req.TerminalId) > v.cfg.TerminalIDMaxLength {
 		add(fmt.Sprintf("terminal_id: exceeds max length %d", v.cfg.TerminalIDMaxLength))
 	}
-	if utf8.RuneCountInString(req.MerchantId) > v.cfg.MerchantIDMaxLength {
+	if len(req.MerchantId) > v.cfg.MerchantIDMaxLength {
 		add(fmt.Sprintf("merchant_id: exceeds max length %d", v.cfg.MerchantIDMaxLength))
-	}
-
-	// --- RRN (optional) ---
-	if req.RetrievalReferenceNumber != "" && !v.rrnRE.MatchString(req.RetrievalReferenceNumber) {
-		add(fmt.Sprintf("retrieval_reference_number: does not match pattern %s", v.cfg.RRNPattern))
 	}
 
 	if len(errs) > 0 {
@@ -125,10 +97,7 @@ func (v *Validator) ValidateSubmit(req *gatewayv1.SubmitTransactionRequest) erro
 	return nil
 }
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
+// allDigits returns true if every character in s is 0–9.
 func allDigits(s string) bool {
 	for _, r := range s {
 		if r < '0' || r > '9' {
@@ -136,22 +105,4 @@ func allDigits(s string) bool {
 		}
 	}
 	return true
-}
-
-// luhn implements the Luhn algorithm.
-func luhn(pan string) bool {
-	sum := 0
-	alt := false
-	for i := len(pan) - 1; i >= 0; i-- {
-		n := int(pan[i] - '0')
-		if alt {
-			n *= 2
-			if n > 9 {
-				n -= 9
-			}
-		}
-		sum += n
-		alt = !alt
-	}
-	return sum%10 == 0
 }

@@ -8,11 +8,11 @@
 # Output lands in services/proto-gen/ with module path github.com/sentinelswitch/proto
 # (strips the module prefix from each proto's go_package option).
 
-version: v1
+version: v2
 plugins:
-  - plugin: go
+  - local: protoc-gen-go
     out: services/proto-gen
     opt: module=github.com/sentinelswitch/proto
-  - plugin: go-grpc
+  - local: protoc-gen-go-grpc
     out: services/proto-gen
     opt: module=github.com/sentinelswitch/proto,require_unimplemented_servers=false

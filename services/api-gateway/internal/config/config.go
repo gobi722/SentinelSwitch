@@ -222,6 +222,7 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 	if err := loadYAML(redisYAML, &redisWrapper); err != nil {
 		return nil, fmt.Errorf("redis.yaml: %w", err)
 	}
+	fmt.Println(redisWrapper)
 	cfg.Redis = RedisConfig{
 		Pool: redisWrapper.Connection.Pool,
 	}

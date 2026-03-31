@@ -13,12 +13,12 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 
 	"github.com/sentinelswitch/api-gateway/internal/config"
 	"github.com/sentinelswitch/api-gateway/internal/gateway"
@@ -39,12 +39,13 @@ func main() {
 		os.Exit(1)
 	}
 	defer log.Sync() //nolint:errcheck
-
+	godotenv.Load(".env")
 	// -------------------------------------------------------------------------
 	// Config
 	// -------------------------------------------------------------------------
-	cfgPath := envOr("CONFIG_PATH", "config/api-gateway.yaml")
-	cfg, err := config.Load(cfgPath)
+	cfgPath := envOr("CONFIG_PATH", "../../../config/api-gateway.yaml")
+	redisPath := envOr("CONFIG_PATH", "../../../config/redis.yaml")
+	cfg, err := config.Load(cfgPath, redisPath)
 	if err != nil {
 		log.Fatal("config load failed", zap.String("path", cfgPath), zap.Error(err))
 	}
@@ -54,7 +55,8 @@ func main() {
 	// Build dependencies
 	// -------------------------------------------------------------------------
 	// PAN hashing
-	hasher, err := hashing.New(cfg.Hashing)
+	hasher, err := hashing.New(cfg.PanHashing.SecretEnv, cfg.PanHashing.MaskedPanPrefixLen,
+		cfg.PanHashing.MaskedPanSuffixLen, cfg.PanHashing.MaskChar)
 	if err != nil {
 		log.Fatal("hasher init failed", zap.Error(err))
 	}
@@ -126,9 +128,9 @@ func main() {
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	// gRPC reflection (dev / grpcurl)
-	if cfg.Server.EnableReflection {
-		reflection.Register(grpcServer)
-	}
+	// if cfg.Server.EnableReflection {
+	// 	reflection.Register(grpcServer)
+	// }
 
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPC.Port))
 	if err != nil {
