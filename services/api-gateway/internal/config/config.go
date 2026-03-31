@@ -68,10 +68,10 @@ type MetricsConfig struct {
 }
 
 type HealthConfig struct {
-	Host           string `yaml:"host"`
-	Port           int    `yaml:"port"`
-	LivenessPath   string `yaml:"liveness_path"`
-	ReadinessPath  string `yaml:"readiness_path"`
+	Host          string `yaml:"host"`
+	Port          int    `yaml:"port"`
+	LivenessPath  string `yaml:"liveness_path"`
+	ReadinessPath string `yaml:"readiness_path"`
 }
 
 // ---------------------------------------------------------------------------
@@ -102,23 +102,23 @@ type IdempotencyConfig struct {
 // ---------------------------------------------------------------------------
 
 type KafkaConfig struct {
-	Brokers  string               `yaml:"brokers"`
-	Topic    string               `yaml:"topic"`
-	Producer KafkaProducerConfig  `yaml:"producer"`
+	Brokers  string              `yaml:"brokers"`
+	Topic    string              `yaml:"topic"`
+	Producer KafkaProducerConfig `yaml:"producer"`
 }
 
 type KafkaProducerConfig struct {
-	ValueSerializer    string `yaml:"value_serializer"`
-	SchemaRegistryURL  string `yaml:"schema_registry_url"`
-	SchemaSubject      string `yaml:"schema_subject"`
-	Acks               string `yaml:"acks"`
-	EnableIdempotence  bool   `yaml:"enable_idempotence"`
-	Retries            int    `yaml:"retries"`
-	DeliveryTimeoutMs  int    `yaml:"delivery_timeout_ms"`
-	LingerMs           int    `yaml:"linger_ms"`
-	BatchSizeBytes     int    `yaml:"batch_size_bytes"`
-	CompressionType    string `yaml:"compression_type"`
-	ClientID           string `yaml:"client_id"`
+	ValueSerializer   string `yaml:"value_serializer"`
+	SchemaRegistryURL string `yaml:"schema_registry_url"`
+	SchemaSubject     string `yaml:"schema_subject"`
+	Acks              string `yaml:"acks"`
+	EnableIdempotence bool   `yaml:"enable_idempotence"`
+	Retries           int    `yaml:"retries"`
+	DeliveryTimeoutMs int    `yaml:"delivery_timeout_ms"`
+	LingerMs          int    `yaml:"linger_ms"`
+	BatchSizeBytes    int    `yaml:"batch_size_bytes"`
+	CompressionType   string `yaml:"compression_type"`
+	ClientID          string `yaml:"client_id"`
 }
 
 // ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ type ValidationConfig struct {
 	SupportedTransactionTypes []string `yaml:"supported_transaction_types"`
 	SupportedChannels         []string `yaml:"supported_channels"`
 	MccPattern                string   `yaml:"mcc_pattern"`
-	TerminalIDMaxLength        int      `yaml:"terminal_id_max_length"`
-	MerchantIDMaxLength        int      `yaml:"merchant_id_max_length"`
+	TerminalIDMaxLength       int      `yaml:"terminal_id_max_length"`
+	MerchantIDMaxLength       int      `yaml:"merchant_id_max_length"`
 	RRNPattern                string   `yaml:"rrn_pattern"`
 }
 
@@ -142,10 +142,10 @@ type ValidationConfig struct {
 // ---------------------------------------------------------------------------
 
 type RateLimitingConfig struct {
-	Enabled            bool   `yaml:"enabled"`
-	RequestsPerSecond  int    `yaml:"requests_per_second"`
-	Burst              int    `yaml:"burst"`
-	IdentityHeader     string `yaml:"identity_header"`
+	Enabled           bool   `yaml:"enabled"`
+	RequestsPerSecond int    `yaml:"requests_per_second"`
+	Burst             int    `yaml:"burst"`
+	IdentityHeader    string `yaml:"identity_header"`
 }
 
 // ---------------------------------------------------------------------------
@@ -163,8 +163,11 @@ type LoggingConfig struct {
 // ---------------------------------------------------------------------------
 
 type RedisConfig struct {
-	Mode     string           `yaml:"mode"`
-	Cluster  RedisClusterConf `yaml:"connection"`
+	Host string `yaml:"host"`
+	Port int    `yaml:"port"`
+	DB   int    `yaml:"db"`
+	// Mode     string           `yaml:"mode"`
+	// Cluster  RedisClusterConf `yaml:"connection"`
 	Password string
 	TLS      bool
 	Pool     RedisPoolConfig
@@ -181,7 +184,7 @@ type RedisPoolConfig struct {
 }
 
 type RedisClusterConf struct {
-	Nodes []RedisNode `yaml:"cluster_nodes"`
+	Nodes      []RedisNode `yaml:"cluster_nodes"`
 	Standalone struct {
 		Host string `yaml:"host"`
 		Port int    `yaml:"port"`
@@ -220,7 +223,7 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 		return nil, fmt.Errorf("redis.yaml: %w", err)
 	}
 	cfg.Redis = RedisConfig{
-		Pool:     redisWrapper.Connection.Pool,
+		Pool: redisWrapper.Connection.Pool,
 	}
 	cfg.Redis.Password = redisWrapper.Connection.Auth.Password
 	cfg.Redis.TLS = redisWrapper.Connection.Auth.TLS

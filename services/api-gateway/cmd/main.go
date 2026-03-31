@@ -61,7 +61,7 @@ func main() {
 
 	// Idempotency store (Redis)
 	idStore := idempotency.New(
-		cfg.Redis.Addr,
+		cfg.Redis.Host,
 		cfg.Redis.Password,
 		cfg.Redis.DB,
 		cfg.Idempotency.KeyPrefix,
@@ -72,32 +72,31 @@ func main() {
 	if err := idStore.Ping(ctx); err != nil {
 		log.Warn("redis ping failed — continuing per on_redis_unavailable policy", zap.Error(err))
 	} else {
-		log.Info("redis connected", zap.String("addr", cfg.Redis.Addr))
+		log.Info("redis connected", zap.String("addr", cfg.Redis.Host))
 	}
 	cancel()
 
-	
 	// Kafka producer
 	producer := kafka.New(kafka.ProducerConfig{
 		Brokers:           cfg.Kafka.Brokers,
 		Topic:             cfg.Kafka.Topic,
-		Acks:              cfg.Kafka.Acks,
-		EnableIdempotence: cfg.Kafka.EnableIdempotence,
-		Retries:           cfg.Kafka.Retries,
-		DeliveryTimeoutMs: cfg.Kafka.DeliveryTimeoutMs,
-		LingerMs:          cfg.Kafka.LingerMs,
-		BatchSizeBytes:    cfg.Kafka.BatchSizeBytes,
-		CompressionType:   cfg.Kafka.CompressionType,
-		ClientID:          cfg.Kafka.ClientID,
-		SchemaRegistryURL: cfg.Kafka.SchemaRegistryURL,
-		SchemaSubject:     cfg.Kafka.SchemaSubject,
+		Acks:              cfg.Kafka.Producer.Acks,
+		EnableIdempotence: cfg.Kafka.Producer.EnableIdempotence,
+		Retries:           cfg.Kafka.Producer.Retries,
+		DeliveryTimeoutMs: cfg.Kafka.Producer.DeliveryTimeoutMs,
+		LingerMs:          cfg.Kafka.Producer.LingerMs,
+		BatchSizeBytes:    cfg.Kafka.Producer.BatchSizeBytes,
+		CompressionType:   cfg.Kafka.Producer.CompressionType,
+		ClientID:          cfg.Kafka.Producer.ClientID,
+		SchemaRegistryURL: cfg.Kafka.Producer.SchemaRegistryURL,
+		SchemaSubject:     cfg.Kafka.Producer.SchemaSubject,
 	})
 
 	// Rate limiter
 	rl := ratelimit.New(
-		cfg.RateLimit.RequestsPerSecond,
-		cfg.RateLimit.BurstSize,
-		cfg.RateLimit.IdentityHeader,
+		cfg.RateLimiting.RequestsPerSecond,
+		cfg.RateLimiting.Burst,
+		cfg.RateLimiting.IdentityHeader,
 	)
 
 	// Validator
@@ -131,9 +130,9 @@ func main() {
 		reflection.Register(grpcServer)
 	}
 
-	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPCPort))
+	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPC.Port))
 	if err != nil {
-		log.Fatal("grpc listen failed", zap.Int("port", cfg.Server.GRPCPort), zap.Error(err))
+		log.Fatal("grpc listen failed", zap.Int("port", cfg.Server.GRPC.Port), zap.Error(err))
 	}
 
 	// -------------------------------------------------------------------------
@@ -145,7 +144,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 	httpSrv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.MetricsPort),
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Metrics.Port),
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 10 * time.Second,
@@ -155,14 +154,14 @@ func main() {
 	// Start
 	// -------------------------------------------------------------------------
 	go func() {
-		log.Info("gRPC server starting", zap.Int("port", cfg.Server.GRPCPort))
+		log.Info("gRPC server starting", zap.Int("port", cfg.Server.GRPC.Port))
 		if err := grpcServer.Serve(grpcLis); err != nil {
 			log.Fatal("gRPC serve error", zap.Error(err))
 		}
 	}()
 
 	go func() {
-		log.Info("HTTP server starting", zap.Int("port", cfg.Server.MetricsPort))
+		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Metrics.Port))
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("HTTP serve error", zap.Error(err))
 		}
