@@ -30,7 +30,7 @@ import (
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
 // Requires gRPC-Go v1.64.0 or later.
-const _ = grpc.SupportPackageIsVersion8
+const _ = grpc.SupportPackageIsVersion9
 
 const (
 	RiskService_CalculateRisk_FullMethodName = "/sentinel.risk.v1.RiskService/CalculateRisk"

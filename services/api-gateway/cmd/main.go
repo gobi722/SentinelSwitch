@@ -43,8 +43,8 @@ func main() {
 	// -------------------------------------------------------------------------
 	// Config
 	// -------------------------------------------------------------------------
-	cfgPath := envOr("CONFIG_PATH", "../../../config/api-gateway.yaml")
-	redisPath := envOr("CONFIG_PATH", "../../../config/redis.yaml")
+	cfgPath := envOr("CONFIG_PATH", "../../config/api-gateway.yaml")
+	redisPath := envOr("CONFIG_PATH", "../../config/redis.yaml")
 	cfg, err := config.Load(cfgPath, redisPath)
 	if err != nil {
 		log.Fatal("config load failed", zap.String("path", cfgPath), zap.Error(err))

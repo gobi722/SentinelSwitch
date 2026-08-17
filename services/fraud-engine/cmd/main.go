@@ -24,7 +24,7 @@ func main() {
 	godotenv.Load(".env")
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
-		cfgPath = "../../../config/fraud-engine.yaml"
+		cfgPath = "../../config/fraud-engine.yaml"
 	}
 
 	cfg, err := config.Load(cfgPath)
@@ -60,7 +60,7 @@ func main() {
 
 	rulesPath := os.Getenv("RULES_CONFIG")
 	if rulesPath == "" {
-		rulesPath = cfg.Rules.ConfigFile
+		rulesPath = "../../config/fraud-rules.yaml"
 	}
 	engine, err := rules.NewEngine(rulesPath)
 	if err != nil {

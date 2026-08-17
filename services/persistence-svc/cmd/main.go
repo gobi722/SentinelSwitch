@@ -24,7 +24,7 @@ func main() {
 	godotenv.Load(".env")
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
-		cfgPath = "../../../config/persistence-svc.yaml"
+		cfgPath = "../../config/persistence-svc.yaml"
 	}
 
 	cfg, err := config.Load(cfgPath)
