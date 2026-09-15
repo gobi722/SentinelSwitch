@@ -34,13 +34,20 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "fieldConfig": {
-        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "mappings": [
+            { "type": "special", "options": { "match": "nan", "result": { "text": "No data yet" } } }
+          ]
+        },
         "overrides": []
       },
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(sentinel_persistence_upserts_total{job=\"persistence-svc\", status=\"success\"}[5m])) / sum(rate(sentinel_persistence_upserts_total{job=\"persistence-svc\"}[5m]))",
+          "expr": "sum(increase(sentinel_persistence_upserts_total{job=\"persistence-svc\", status=\"success\"}[$__range])) / sum(increase(sentinel_persistence_upserts_total{job=\"persistence-svc\"}[$__range]))",
           "legendFormat": "success ratio",
           "refId": "A"
         }
