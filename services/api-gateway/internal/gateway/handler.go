@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,6 +17,25 @@ import (
 	"github.com/sentinelswitch/api-gateway/internal/ratelimit"
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
 	transactionv1 "github.com/sentinelswitch/proto/transactions/v1"
+)
+
+// Prometheus metrics
+var (
+	requestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "sentinel_gateway_requests_total",
+		Help: "Total SubmitTransaction requests partitioned by outcome.",
+	}, []string{"result"})
+
+	requestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "sentinel_gateway_request_duration_seconds",
+		Help:    "SubmitTransaction handler duration.",
+		Buckets: prometheus.DefBuckets,
+	})
+
+	idempotencyHitsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "sentinel_gateway_idempotency_hits_total",
+		Help: "Total requests rejected as duplicates by the idempotency store.",
+	})
 )
 
 // Handler implements gatewayv1.GatewayServiceServer.
@@ -52,13 +73,22 @@ func (h *Handler) SubmitTransaction(
 	req *gatewayv1.TransactionRequest,
 ) (*gatewayv1.TransactionAck, error) {
 
+	start := time.Now()
+	result := "accepted"
+	defer func() {
+		requestsTotal.WithLabelValues(result).Inc()
+		requestDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	// 1. Rate limit
 	if !h.rateLimiter.Allow(ctx) {
+		result = "rate_limited"
 		return nil, status.Error(codes.ResourceExhausted, "rate limit exceeded")
 	}
 
 	// 2. Validate
 	if err := h.validator.ValidateSubmit(req); err != nil {
+		result = "validation_error"
 		return nil, err
 	}
 
@@ -71,6 +101,7 @@ func (h *Handler) SubmitTransaction(
 	original, isDuplicate, err := h.idempotency.CheckAndSet(ctx, req.IdempotencyKey, txnID)
 	if err != nil {
 		h.log.Error("idempotency store error", zap.Error(err))
+		result = "internal_error"
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	if isDuplicate {
@@ -78,6 +109,8 @@ func (h *Handler) SubmitTransaction(
 			zap.String("idempotency_key", req.IdempotencyKey),
 			zap.String("original_txn_id", original),
 		)
+		result = "duplicate"
+		idempotencyHitsTotal.Inc()
 		return &gatewayv1.TransactionAck{
 			TxnId:  original,
 			Status: gatewayv1.TransactionStatus_PENDING,
@@ -106,6 +139,7 @@ func (h *Handler) SubmitTransaction(
 			zap.String("txn_id", txnID),
 			zap.Error(err),
 		)
+		result = "internal_error"
 		return nil, status.Error(codes.Internal, "failed to enqueue transaction")
 	}
 
