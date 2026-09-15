@@ -332,7 +332,7 @@ func deserializeTransaction(raw []byte) (*transactionspb.TransactionEvent, error
 // The schema ID is fetched once from the Schema Registry and cached.
 func (p *Processor) serializeFraudResult(ctx context.Context, result *fraudpb.FraudResultEvent) ([]byte, error) {
 	p.schemaOnce.Do(func() {
-		id, err := p.fetchSchemaID(ctx, "fraud-results-value")
+		id, err := p.fetchSchemaID(ctx, "fraud_results-value")
 		if err != nil {
 			p.schemaErr = fmt.Errorf("fetch schema id: %w", err)
 			return
