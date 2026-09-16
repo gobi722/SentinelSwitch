@@ -88,6 +88,38 @@ idempotency:
   #   sentinel_idempotency_redis_miss_total (counter)
 
 # -----------------------------------------------------------------------------
+# AUTH — API-key authentication
+# Every RPC (except health checks) must carry the header below. The key is
+# hashed (SHA-256) and looked up against the api_clients table (Postgres),
+# cached in Redis DB 3 to avoid a DB round-trip per request.
+# Fails CLOSED: a Postgres outage returns UNAVAILABLE, never allow-through.
+# -----------------------------------------------------------------------------
+auth:
+  api_key_header: x-api-key
+  cache_redis_db: 3            # matches redis.yaml databases.api_key_cache
+  cache_ttl_seconds: 60
+
+# -----------------------------------------------------------------------------
+# POSTGRES — api_clients registry (used by the auth store)
+# Same PostgreSQL instance/database persistence-svc writes to — just a
+# different table (db/migrations/003_create_api_clients.sql).
+# -----------------------------------------------------------------------------
+postgres:
+  host:     ${POSTGRES_HOST:-localhost}
+  port:     ${POSTGRES_PORT:-5432}
+  database: ${POSTGRES_DB:-sentinelswitch}
+  username: ${POSTGRES_USER:-sentinel}
+  password: ${POSTGRES_PASSWORD}          # required; unset = service refuses to start
+
+  ssl_mode: ${POSTGRES_SSL_MODE:-disable}
+
+  pool:
+    max_open_conns:    ${API_GATEWAY_PG_MAX_OPEN:-10}
+    max_idle_conns:    ${API_GATEWAY_PG_MAX_IDLE:-2}
+    conn_max_lifetime: 1800
+    connect_timeout_ms: 5000
+
+# -----------------------------------------------------------------------------
 # KAFKA PRODUCER
 # Publishes TransactionEvent to topic: transactions
 # Partition key: card_hash — all events for same card go to same partition.

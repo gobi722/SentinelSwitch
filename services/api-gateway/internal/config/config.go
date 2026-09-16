@@ -20,6 +20,8 @@ type Config struct {
 	Server       ServerConfig       `yaml:"server"`
 	PanHashing   PanHashingConfig   `yaml:"pan_hashing"`
 	Idempotency  IdempotencyConfig  `yaml:"idempotency"`
+	Auth         AuthConfig         `yaml:"auth"`
+	Postgres     PostgresConfig     `yaml:"postgres"`
 	Kafka        KafkaConfig        `yaml:"kafka"`
 	Validation   ValidationConfig   `yaml:"validation"`
 	RateLimiting RateLimitingConfig `yaml:"rate_limiting"`
@@ -27,6 +29,37 @@ type Config struct {
 
 	// Redis connection details — loaded from redis.yaml
 	Redis RedisConfig
+}
+
+// ---------------------------------------------------------------------------
+// Auth (API-key authentication)
+// ---------------------------------------------------------------------------
+
+type AuthConfig struct {
+	ApiKeyHeader    string `yaml:"api_key_header"`
+	CacheRedisDB    int    `yaml:"cache_redis_db"`
+	CacheTTLSeconds int    `yaml:"cache_ttl_seconds"`
+}
+
+// ---------------------------------------------------------------------------
+// Postgres (api_clients registry, used by the auth store)
+// ---------------------------------------------------------------------------
+
+type PostgresConfig struct {
+	Host     string          `yaml:"host"`
+	Port     int             `yaml:"port"`
+	Database string          `yaml:"database"`
+	Username string          `yaml:"username"`
+	Password string          `yaml:"password"`
+	SSLMode  string          `yaml:"ssl_mode"`
+	Pool     PostgresPoolCfg `yaml:"pool"`
+}
+
+type PostgresPoolCfg struct {
+	MaxOpenConns     int `yaml:"max_open_conns"`
+	MaxIdleConns     int `yaml:"max_idle_conns"`
+	ConnMaxLifetime  int `yaml:"conn_max_lifetime"`
+	ConnectTimeoutMs int `yaml:"connect_timeout_ms"`
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +270,36 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 		return nil, fmt.Errorf("required env var %s is not set (pan_hashing.secret_env)", cfg.PanHashing.SecretEnv)
 	}
 
+	applyAuthDefaults(cfg)
+
 	return cfg, nil
+}
+
+func applyAuthDefaults(cfg *Config) {
+	if cfg.Auth.ApiKeyHeader == "" {
+		cfg.Auth.ApiKeyHeader = "x-api-key"
+	}
+	if cfg.Auth.CacheTTLSeconds == 0 {
+		cfg.Auth.CacheTTLSeconds = 60
+	}
+	if cfg.Postgres.Port == 0 {
+		cfg.Postgres.Port = 5432
+	}
+	if cfg.Postgres.SSLMode == "" {
+		cfg.Postgres.SSLMode = "disable"
+	}
+	if cfg.Postgres.Pool.MaxOpenConns == 0 {
+		cfg.Postgres.Pool.MaxOpenConns = 10
+	}
+	if cfg.Postgres.Pool.MaxIdleConns == 0 {
+		cfg.Postgres.Pool.MaxIdleConns = 2
+	}
+	if cfg.Postgres.Pool.ConnMaxLifetime == 0 {
+		cfg.Postgres.Pool.ConnMaxLifetime = 1800
+	}
+	if cfg.Postgres.Pool.ConnectTimeoutMs == 0 {
+		cfg.Postgres.Pool.ConnectTimeoutMs = 5000
+	}
 }
 
 // ---------------------------------------------------------------------------

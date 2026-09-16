@@ -11,6 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/sentinelswitch/api-gateway/internal/auth"
 	"github.com/sentinelswitch/api-gateway/internal/hashing"
 	"github.com/sentinelswitch/api-gateway/internal/idempotency"
 	"github.com/sentinelswitch/api-gateway/internal/kafka"
@@ -73,6 +74,14 @@ func (h *Handler) SubmitTransaction(
 	req *gatewayv1.TransactionRequest,
 ) (*gatewayv1.TransactionAck, error) {
 
+	// Verified caller identity, injected by auth.UnaryServerInterceptor.
+	// Unreachable in practice (the interceptor rejects unauthenticated calls
+	// before the handler runs) — defended here rather than trusted blindly.
+	clientID, ok := auth.ClientIDFromContext(ctx)
+	if !ok || clientID == "" {
+		return nil, status.Error(codes.Internal, "missing authenticated client identity")
+	}
+
 	start := time.Now()
 	result := "accepted"
 	defer func() {
@@ -131,6 +140,7 @@ func (h *Handler) SubmitTransaction(
 		Mcc:             req.Mcc,
 		TransactionType: transactionv1.TransactionType(req.TransactionType),
 		Channel:         transactionv1.Channel(req.Channel),
+		ClientId:        clientID,
 	}
 
 	// 6. Publish — keyed on card_hash for partition locality

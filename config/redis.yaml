@@ -23,6 +23,12 @@
 #      Tracks open/half-open/closed state for the Risk Service gRPC circuit breaker.
 #      Key: cb:risk_service:state     Value: "OPEN" | "HALF_OPEN" | "CLOSED"
 #      Key: cb:risk_service:failures  Value: integer counter   TTL: 60 s (resets on success)
+#
+#   5. API Key Cache (API Gateway auth)
+#      Read-through cache in front of the api_clients Postgres table.
+#      Key: apikey:{sha256(api_key)}   Value: "{client_id}|{status}"   TTL: 60 s
+#      Optimization only — a cache miss/error falls through to Postgres; auth
+#      never degrades open on a Redis failure (see services/api-gateway/internal/auth).
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -189,6 +195,7 @@ databases:
   velocity:      0
   idempotency:   1
   circuit_breaker: 2
+  api_key_cache: 3
 
 # -----------------------------------------------------------------------------
 # EVICTION POLICY — per-database (requires separate Redis instances or logical
@@ -208,15 +215,20 @@ databases:
 # DB 2 (circuit breaker): volatile-lru
 #   CB state keys carry TTLs; volatile-lru evicts only keyed items safely.
 #
-# Deployment note: strongly prefer three separate Redis instances so each can
+# DB 3 (api key cache):   volatile-lru
+#   Pure cache in front of Postgres — eviction just costs one extra DB round
+#   trip on the next lookup, never a correctness issue.
+#
+# Deployment note: strongly prefer separate Redis instances so each can
 # be sized and tuned independently.  If a single instance is unavoidable,
 # set maxmemory-policy = noeviction at the instance level and rely on
-# per-key TTLs for DB 0 / DB 2 cleanup.
+# per-key TTLs for DB 0 / DB 2 / DB 3 cleanup.
 # -----------------------------------------------------------------------------
 eviction:
   db0_velocity:        allkeys-lru
   db1_idempotency:     noeviction     # MUST NOT evict — see note above
   db2_circuit_breaker: volatile-lru
+  db3_api_key_cache:   volatile-lru
 
 # -----------------------------------------------------------------------------
 # HEALTH CHECK

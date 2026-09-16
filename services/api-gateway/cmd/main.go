@@ -13,6 +13,7 @@ import (
 	grpc_middleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpc_zap "github.com/grpc-ecosystem/go-grpc-middleware/logging/zap"
 	grpc_recovery "github.com/grpc-ecosystem/go-grpc-middleware/recovery"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -20,6 +21,7 @@ import (
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/sentinelswitch/api-gateway/internal/auth"
 	"github.com/sentinelswitch/api-gateway/internal/config"
 	"github.com/sentinelswitch/api-gateway/internal/gateway"
 	"github.com/sentinelswitch/api-gateway/internal/hashing"
@@ -60,6 +62,39 @@ func main() {
 	if err != nil {
 		log.Fatal("hasher init failed", zap.Error(err))
 	}
+
+	// Auth: Postgres pool (api_clients registry)
+	pgDSN := fmt.Sprintf(
+		"host=%s port=%d dbname=%s user=%s password=%s sslmode=%s connect_timeout=%d",
+		cfg.Postgres.Host,
+		cfg.Postgres.Port,
+		cfg.Postgres.Database,
+		cfg.Postgres.Username,
+		cfg.Postgres.Password,
+		cfg.Postgres.SSLMode,
+		cfg.Postgres.Pool.ConnectTimeoutMs/1000,
+	)
+	pgPoolCfg, err := pgxpool.ParseConfig(pgDSN)
+	if err != nil {
+		log.Fatal("failed to parse postgres dsn", zap.Error(err))
+	}
+	pgPoolCfg.MaxConns = int32(cfg.Postgres.Pool.MaxOpenConns)
+	pgPoolCfg.MinConns = int32(cfg.Postgres.Pool.MaxIdleConns)
+	pgPoolCfg.MaxConnLifetime = time.Duration(cfg.Postgres.Pool.ConnMaxLifetime) * time.Second
+
+	pgPool, err := pgxpool.NewWithConfig(context.Background(), pgPoolCfg)
+	if err != nil {
+		log.Fatal("failed to create postgres pool for auth", zap.Error(err))
+	}
+
+	authStore := auth.NewStore(pgPool)
+	authCache := auth.NewCache(
+		authStore,
+		fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
+		cfg.Redis.Password,
+		cfg.Auth.CacheRedisDB,
+		cfg.Auth.CacheTTLSeconds,
+	)
 
 	// Idempotency store (Redis)
 	idStore := idempotency.New(
@@ -117,6 +152,7 @@ func main() {
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			grpc_zap.UnaryServerInterceptor(log),
 			grpc_recovery.UnaryServerInterceptor(),
+			auth.UnaryServerInterceptor(authCache, cfg.Auth.ApiKeyHeader, cfg.RateLimiting.IdentityHeader, log),
 		)),
 	)
 
@@ -194,6 +230,10 @@ func main() {
 	if err := idStore.Close(); err != nil {
 		log.Error("idempotency store close error", zap.Error(err))
 	}
+	if err := authCache.Close(); err != nil {
+		log.Error("auth cache close error", zap.Error(err))
+	}
+	authStore.Close()
 
 	log.Info("shutdown complete")
 }
