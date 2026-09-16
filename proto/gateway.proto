@@ -17,10 +17,13 @@
 //   b) subscribe to a webhook (configured per merchant, out of scope here)
 //
 // Authorization:
-//   Every call must carry a valid Bearer JWT in the gRPC metadata key
-//   "authorization".  The JWT is validated by the API Gateway before the
-//   handler runs.  Merchant claims are embedded in the token; the gateway
-//   derives merchant_id from the JWT rather than trusting the request body.
+//   Every call must carry a valid API key in the gRPC metadata key
+//   "x-api-key". The API Gateway validates it against the api_clients
+//   registry (Postgres, Redis-cached) before the handler runs, and derives
+//   a verified client_id (the caller/integrator identity) from the key —
+//   never from the request body. This is distinct from merchant_id, which
+//   remains client-supplied business data identifying which merchant the
+//   transaction is FOR, not who is calling the API.
 // =============================================================================
 
 syntax = "proto3";
@@ -76,10 +79,12 @@ message TransactionRequest {
 
     // ------------------------------------------------------------------
     // Merchant context
-    // merchant_id is derived from the JWT; clients cannot override it.
-    // The gateway populates it from the JWT claim before Kafka publish.
+    // merchant_id identifies which merchant the transaction is FOR.
+    // Client-supplied. Distinct from the caller's own identity (client_id),
+    // which is derived server-side from the authenticated x-api-key and is
+    // never present on this request.
     // ------------------------------------------------------------------
-    string merchant_id     = 6;  // Read-only: populated from JWT by gateway
+    string merchant_id     = 6;
     string mcc             = 7;  // ISO 18245 — merchant category code
 
     // ------------------------------------------------------------------
@@ -180,13 +185,15 @@ enum Channel {
 // gRPC status codes used by GatewayService:
 //
 //   INVALID_ARGUMENT    — malformed request (bad currency, negative amount …)
-//   UNAUTHENTICATED     — missing or invalid JWT
-//   PERMISSION_DENIED   — merchant_id in JWT does not match request
+//   UNAUTHENTICATED     — missing or invalid x-api-key
+//   PERMISSION_DENIED   — API key belongs to a suspended/inactive client
 //   ALREADY_EXISTS      — duplicate idempotency_key within 24 h window
 //   NOT_FOUND           — txn_id unknown or expired (GetTransactionStatus)
-//   RESOURCE_EXHAUSTED  — rate limit exceeded for this merchant
+//   RESOURCE_EXHAUSTED  — rate limit exceeded for this caller
 //   INTERNAL            — unexpected server error (safe to retry with backoff)
-//   UNAVAILABLE         — Kafka or Redis temporarily unreachable (retry)
+//   UNAVAILABLE         — Kafka, Redis, or Postgres temporarily unreachable
+//                         (retry) — auth fails CLOSED on backing-store outage,
+//                         it never falls back to allowing unauthenticated traffic
 //
 // All error responses include a google.rpc.ErrorInfo detail message with:
 //   reason   : machine-readable error code (e.g. "DUPLICATE_IDEMPOTENCY_KEY")

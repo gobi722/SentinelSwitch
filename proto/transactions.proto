@@ -61,6 +61,15 @@ message TransactionEvent {
     // Network Reference
     // ------------------------------------------------------------------
     string rrn              = 13; // Retrieval Reference Number — 12 chars
+
+    // ------------------------------------------------------------------
+    // Caller identity
+    // ------------------------------------------------------------------
+    // Verified integrator identity, set server-side by API Gateway from the
+    // authenticated x-api-key context. NEVER present in the inbound
+    // TransactionRequest — not client-supplied. Distinct from merchant_id,
+    // which identifies the merchant the transaction is FOR, not the caller.
+    string client_id        = 14;
 }
 
 // ------------------------------------------------------------------

@@ -280,8 +280,12 @@ type FraudResultEvent struct {
 	Decision       Decision `protobuf:"varint,15,opt,name=decision,proto3,enum=sentinel.fraud.v1.Decision" json:"decision,omitempty"`  // APPROVE / DECLINE / REVIEW
 	RiskScore      int32    `protobuf:"varint,16,opt,name=risk_score,json=riskScore,proto3" json:"risk_score,omitempty"`               // 100–1000
 	TriggeredRules []string `protobuf:"bytes,17,rep,name=triggered_rules,json=triggeredRules,proto3" json:"triggered_rules,omitempty"` // ["HIGH_AMOUNT", "VELOCITY_SPIKE"]
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// ------------------------------------------------------------------
+	// Caller identity (mirrored from TransactionEvent.client_id)
+	// ------------------------------------------------------------------
+	ClientId      string `protobuf:"bytes,18,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FraudResultEvent) Reset() {
@@ -433,11 +437,18 @@ func (x *FraudResultEvent) GetTriggeredRules() []string {
 	return nil
 }
 
+func (x *FraudResultEvent) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
 var File_proto_fraud_results_proto protoreflect.FileDescriptor
 
 const file_proto_fraud_results_proto_rawDesc = "" +
 	"\n" +
-	"\x19proto/fraud_results.proto\x12\x11sentinel.fraud.v1\"\x8b\x05\n" +
+	"\x19proto/fraud_results.proto\x12\x11sentinel.fraud.v1\"\xa8\x05\n" +
 	"\x10FraudResultEvent\x12\x15\n" +
 	"\x06txn_id\x18\x01 \x01(\tR\x05txnId\x12#\n" +
 	"\rtxn_timestamp\x18\x02 \x01(\tR\ftxnTimestamp\x12!\n" +
@@ -460,7 +471,8 @@ const file_proto_fraud_results_proto_rawDesc = "" +
 	"\bdecision\x18\x0f \x01(\x0e2\x1b.sentinel.fraud.v1.DecisionR\bdecision\x12\x1d\n" +
 	"\n" +
 	"risk_score\x18\x10 \x01(\x05R\triskScore\x12'\n" +
-	"\x0ftriggered_rules\x18\x11 \x03(\tR\x0etriggeredRules*J\n" +
+	"\x0ftriggered_rules\x18\x11 \x03(\tR\x0etriggeredRules\x12\x1b\n" +
+	"\tclient_id\x18\x12 \x01(\tR\bclientId*J\n" +
 	"\bDecision\x12\x18\n" +
 	"\x14DECISION_UNSPECIFIED\x10\x00\x12\v\n" +
 	"\aAPPROVE\x10\x01\x12\v\n" +

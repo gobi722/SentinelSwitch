@@ -72,6 +72,11 @@ message FraudResultEvent {
     Decision         decision         = 15;  // APPROVE / DECLINE / REVIEW
     int32            risk_score       = 16;  // 100–1000
     repeated string  triggered_rules  = 17;  // ["HIGH_AMOUNT", "VELOCITY_SPIKE"]
+
+    // ------------------------------------------------------------------
+    // Caller identity (mirrored from TransactionEvent.client_id)
+    // ------------------------------------------------------------------
+    string           client_id        = 18;
 }
 
 // ------------------------------------------------------------------

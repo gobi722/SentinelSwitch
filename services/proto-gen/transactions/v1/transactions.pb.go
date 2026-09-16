@@ -224,7 +224,15 @@ type TransactionEvent struct {
 	// ------------------------------------------------------------------
 	// Network Reference
 	// ------------------------------------------------------------------
-	Rrn           string `protobuf:"bytes,13,opt,name=rrn,proto3" json:"rrn,omitempty"` // Retrieval Reference Number — 12 chars
+	Rrn string `protobuf:"bytes,13,opt,name=rrn,proto3" json:"rrn,omitempty"` // Retrieval Reference Number — 12 chars
+	// ------------------------------------------------------------------
+	// Caller identity
+	// ------------------------------------------------------------------
+	// Verified integrator identity, set server-side by API Gateway from the
+	// authenticated x-api-key context. NEVER present in the inbound
+	// TransactionRequest — not client-supplied. Distinct from merchant_id,
+	// which identifies the merchant the transaction is FOR, not the caller.
+	ClientId      string `protobuf:"bytes,14,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -350,11 +358,18 @@ func (x *TransactionEvent) GetRrn() string {
 	return ""
 }
 
+func (x *TransactionEvent) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
 var File_proto_transactions_proto protoreflect.FileDescriptor
 
 const file_proto_transactions_proto_rawDesc = "" +
 	"\n" +
-	"\x18proto/transactions.proto\x12\x18sentinel.transactions.v1\"\xfc\x03\n" +
+	"\x18proto/transactions.proto\x12\x18sentinel.transactions.v1\"\x99\x04\n" +
 	"\x10TransactionEvent\x12\x15\n" +
 	"\x06txn_id\x18\x01 \x01(\tR\x05txnId\x12#\n" +
 	"\rtxn_timestamp\x18\x02 \x01(\tR\ftxnTimestamp\x12\x1b\n" +
@@ -372,7 +387,8 @@ const file_proto_transactions_proto_rawDesc = "" +
 	" \x01(\x0e2).sentinel.transactions.v1.TransactionTypeR\x0ftransactionType\x12;\n" +
 	"\achannel\x18\v \x01(\x0e2!.sentinel.transactions.v1.ChannelR\achannel\x128\n" +
 	"\x06scheme\x18\f \x01(\x0e2 .sentinel.transactions.v1.SchemeR\x06scheme\x12\x10\n" +
-	"\x03rrn\x18\r \x01(\tR\x03rrn*b\n" +
+	"\x03rrn\x18\r \x01(\tR\x03rrn\x12\x1b\n" +
+	"\tclient_id\x18\x0e \x01(\tR\bclientId*b\n" +
 	"\x0fTransactionType\x12 \n" +
 	"\x1cTRANSACTION_TYPE_UNSPECIFIED\x10\x00\x12\t\n" +
 	"\x05SALES\x10\x01\x12\b\n" +
