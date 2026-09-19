@@ -208,6 +208,7 @@ func (p *Processor) handle(ctx context.Context, msg kafkago.Message) error {
 		Decision:        fraudpb.Decision(decision),
 		RiskScore:       riskScore,
 		TriggeredRules:  triggeredStrs,
+		ClientId:        txn.ClientId,
 	}
 
 	// Step 9 — Serialize and publish to fraud_results topic
