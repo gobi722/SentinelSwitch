@@ -31,13 +31,29 @@ services:
         condition: service_healthy
     ports:
       - "9092:9092"
+      - "9096:9096"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://localhost:9092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092,PUBLIC://0.0.0.0:9096
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://localhost:9092,PUBLIC://localhost:9096
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,PUBLIC:SASL_PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # ---------------------------------------------------------------------
+      # PUBLIC listener (9096) — SASL/SCRAM-authenticated, for external
+      # callers to consume their own results.<client_id> topic. INTERNAL and
+      # EXTERNAL are untouched (still anonymous PLAINTEXT, as before).
+      # See docs/MULTI_TENANT_RESULT_DELIVERY.md and scripts/provision-client.sh.
+      # ---------------------------------------------------------------------
+      KAFKA_SASL_ENABLED_MECHANISMS: SCRAM-SHA-256
+      KAFKA_LISTENER_NAME_PUBLIC_SASL_ENABLED_MECHANISMS: SCRAM-SHA-256
+      KAFKA_LISTENER_NAME_PUBLIC_SCRAM-SHA-256_SASL_JAAS_CONFIG: "org.apache.kafka.common.security.scram.ScramLoginModule required;"
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      # Anonymous (INTERNAL/EXTERNAL) principal stays a super-user so every
+      # existing consumer group keeps working exactly as before — 100% of
+      # new ACL enforcement is confined to the PUBLIC listener's non-anonymous
+      # (SASL-authenticated) principals.
+      KAFKA_SUPER_USERS: User:ANONYMOUS
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1

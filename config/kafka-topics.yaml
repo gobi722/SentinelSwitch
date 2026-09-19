@@ -85,6 +85,31 @@ topics:
       compression.type: "lz4"
 
   # ---------------------------------------------------------------------------
+  # results_unrouted_dlq  (Dead Letter Queue)
+  # Producer  : Result Notifier — when a FraudResultEvent's client_id is
+  #             missing/invalid, or publishing to its results.<client_id>
+  #             topic fails after max retries
+  # Consumer  : Ops team (manual or scheduled)
+  # Key       : same key as the original fraud_results message
+  # Value     : raw FraudResultEvent bytes (identical payload that failed)
+  #
+  # Same header convention as transaction_dlq: dlq-original-topic,
+  # dlq-original-offset, dlq-original-partition, dlq-failure-reason
+  # ("decode_error" | "unroutable_client_id" | "publish_error"),
+  # dlq-retry-count, dlq-failed-at.
+  # ---------------------------------------------------------------------------
+  - name: results_unrouted_dlq
+    partitions: 3
+    replication_factor: 3
+    config:
+      retention.ms: "1209600000"    # 14 days in milliseconds
+      retention.bytes: "1073741824"
+      cleanup.policy: "delete"
+      min.insync.replicas: "2"
+      max.message.bytes: "1048576"
+      compression.type: "lz4"
+
+  # ---------------------------------------------------------------------------
   # fraud_results
   # Producer  : Fraud Engine
   # Consumer  : Persistence Service  (consumer group: persistence-svc-cg)
@@ -154,6 +179,37 @@ consumer_groups:
     max.poll.interval.ms: "120000"
     session.timeout.ms: "10000"
     heartbeat.interval.ms: "3000"
+
+  result-notifier-cg:
+    auto.offset.reset: "earliest"
+    enable.auto.commit: "false"   # Manual commit — only after route or DLQ publish
+    max.poll.records: "500"
+    max.poll.interval.ms: "30000"
+    session.timeout.ms: "10000"
+    heartbeat.interval.ms: "3000"
+    fetch.min.bytes: "1"          # Low latency — results should reach callers quickly
+    fetch.max.wait.ms: "500"
+
+# =============================================================================
+# Dynamic per-client result topics — results.<client_id>
+#
+# Unlike the fixed topics above, these are NOT created upfront: one is
+# created per external caller/integrator at onboarding time via
+# scripts/provision-client.sh, which also creates that client's Kafka SCRAM
+# credentials and restricts them (via ACL) to read ONLY their own topic and
+# consumer groups prefixed "<client_id>.".
+#
+# Local-dev provisioning uses 1 partition / replication_factor 1 (matches
+# the single-broker cluster here — same divergence from this file's stated
+# RF 3 that the quick-start commands below already make for the fixed
+# topics). Production provisioning should match the fixed topics' RF 3.
+#
+# Naming: results.<client_id>   e.g. results.acme-payments
+# Retention: left at the broker default (no fixed policy here since topic
+# count and per-tenant volume both grow with the number of clients).
+#
+# See docs/MULTI_TENANT_RESULT_DELIVERY.md for the full design.
+# =============================================================================
 
 # =============================================================================
 # Confluent CLI — create / describe commands (reference)

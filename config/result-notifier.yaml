@@ -1,0 +1,80 @@
+# =============================================================================
+# SentinelSwitch — Result Notifier Service Configuration
+# Ticket  : CREDO-ALERT-001 (multi-tenant result delivery follow-on)
+# Service : result-notifier
+# Role    : Bridges the internal fraud_results topic to per-client external
+#           topics, so external callers/integrators can consume only their
+#           own fraud results — never anyone else's.
+# =============================================================================
+#
+# Processing flow:
+#   1. Consume FraudResultEvent from Kafka topic: fraud_results
+#      (same trusted, anonymous listener the other internal services use —
+#      no SASL credentials of its own needed; see docs/MULTI_TENANT_RESULT_DELIVERY.md)
+#   2. Read client_id from the event; resolve to topic: results.<client_id>
+#   3. Republish the ORIGINAL message bytes unchanged to that topic
+#      (no re-serialization, no Schema Registry access needed on publish)
+#   4. On unroutable client_id or exhausted publish retries: send to
+#      results_unrouted_dlq instead of dropping the event
+#   5. Commit Kafka offset only after a successful route OR a successful
+#      DLQ publish — never on an unhandled error (matches persistence-svc's
+#      commit-after-success-or-dlq semantics, not fraud-engine's always-commit)
+#
+# External clients read their own results.<client_id> topic via the
+# SASL-authenticated PUBLIC Kafka listener (see docker-compose.yml), using
+# credentials issued by scripts/provision-client.sh.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# KAFKA
+# Consumer group: result-notifier-cg
+# Manual commit: only after successful route OR DLQ publish
+# -----------------------------------------------------------------------------
+kafka:
+  brokers:
+    - localhost:9092
+
+  consumer:
+    group_id: result-notifier-cg
+    topic: fraud_results
+    schema_registry_url: ${SCHEMA_REGISTRY_URL:-http://localhost:8081}
+    schema_subject: fraud_results-value
+    client_id: sentinel-result-notifier
+
+  dlq_producer:
+    topic: results_unrouted_dlq
+    client_id: sentinel-result-notifier-dlq
+
+# -----------------------------------------------------------------------------
+# ROUTER
+# client_id -> topic_prefix + client_id, e.g. "abc123" -> "results.abc123"
+# client_id is validated against ^[a-zA-Z0-9._-]{1,200}$ before being used as
+# a topic name; anything else is routed to results_unrouted_dlq instead.
+# -----------------------------------------------------------------------------
+router:
+  topic_prefix: "results."
+
+# -----------------------------------------------------------------------------
+# RETRY — bounded exponential backoff before falling back to the unrouted DLQ
+# -----------------------------------------------------------------------------
+retry:
+  max_attempts: 3
+  initial_delay_ms: 500
+  multiplier: 2.0
+  max_delay_ms: 5000
+
+# -----------------------------------------------------------------------------
+# SERVER — metrics + health only (result-notifier has no inbound gRPC)
+# -----------------------------------------------------------------------------
+server:
+  metrics:
+    port: ${RESULT_NOTIFIER_METRICS_PORT:-9098}
+  health:
+    port: ${RESULT_NOTIFIER_HEALTH_PORT:-8085}
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  level: ${LOG_LEVEL:-info}
+  format: json
