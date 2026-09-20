@@ -289,6 +289,19 @@ kafka-topics --bootstrap-server $BROKER \
   --config min.insync.replicas=1 \
   --config max.message.bytes=1048576 \
   --config compression.type=lz4
+
+# --- results_unrouted_dlq ---
+# Result Notifier's DLQ (see docs/MULTI_TENANT_RESULT_DELIVERY.md). Auto-create is
+# disabled, so without this step result-notifier fails to publish its very first
+# unroutable message and retries it forever rather than committing past it.
+kafka-topics --bootstrap-server $BROKER \
+  --create --topic results_unrouted_dlq \
+  --partitions 3 --replication-factor 1 \
+  --config retention.ms=1209600000 \
+  --config retention.bytes=1073741824 \
+  --config cleanup.policy=delete \
+  --config min.insync.replicas=1 \
+  --config max.message.bytes=1048576
 ```
 
 > **Production note:** Use `--replication-factor 3` and `--config min.insync.replicas=2` on a 3-broker cluster.
@@ -297,11 +310,12 @@ kafka-topics --bootstrap-server $BROKER \
 
 ```bash
 kafka-topics --bootstrap-server $BROKER --list
-# Expected: fraud_results  transaction_dlq  transactions
+# Expected: fraud_results  results_unrouted_dlq  transaction_dlq  transactions
 
 kafka-topics --bootstrap-server $BROKER --describe --topic transactions
 kafka-topics --bootstrap-server $BROKER --describe --topic fraud_results
 kafka-topics --bootstrap-server $BROKER --describe --topic transaction_dlq
+kafka-topics --bootstrap-server $BROKER --describe --topic results_unrouted_dlq
 ```
 
 ### 4.3 Consumer Group Reference
