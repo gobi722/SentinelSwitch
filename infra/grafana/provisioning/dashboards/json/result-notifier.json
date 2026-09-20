@@ -1,0 +1,104 @@
+{
+  "uid": "result-notifier",
+  "title": "Result Notifier",
+  "tags": ["sentinelswitch", "result-notifier"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Messages Routed (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(sentinel_result_notifier_messages_routed_total{job=\"result-notifier\"}[5m])",
+          "legendFormat": "routed/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Routing Success Ratio",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "mappings": [
+            { "type": "special", "options": { "match": "nan", "result": { "text": "No data yet" } } }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(sentinel_result_notifier_messages_routed_total{job=\"result-notifier\"}[$__range])) / (sum(increase(sentinel_result_notifier_messages_routed_total{job=\"result-notifier\"}[$__range])) + sum(increase(sentinel_result_notifier_unrouted_total{job=\"result-notifier\"}[$__range])))",
+          "legendFormat": "success ratio",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Unrouted → DLQ (rate)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "fillOpacity": 10 } },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(sentinel_result_notifier_unrouted_total{job=\"result-notifier\"}[5m])",
+          "legendFormat": "unrouted/sec",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Unrouted Total (selected range)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "sum(increase(sentinel_result_notifier_unrouted_total{job=\"result-notifier\"}[$__range]))",
+          "legendFormat": "unrouted (DLQ)",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
