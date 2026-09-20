@@ -1,14 +1,27 @@
+# ---------------------------------------------------------------------------
+# Build context MUST be the repo root, not this directory — go.mod's
+# `replace github.com/sentinelswitch/proto => ../proto-gen` reaches outside
+# services/risk-service/. Build with:
+#   docker build -f services/risk-service/Dockerfile -t sentinel-risk-service .
+# ---------------------------------------------------------------------------
+
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM golang:1.23-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
 
 WORKDIR /workspace
 
-COPY go.mod go.sum ./
+# Shared proto module — sibling of the service dir, matching the relative
+# ../proto-gen path in go.mod's replace directive.
+COPY services/proto-gen ./proto-gen
+
+WORKDIR /workspace/risk-service
+
+COPY services/risk-service/go.mod services/risk-service/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY services/risk-service/. .
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" \
