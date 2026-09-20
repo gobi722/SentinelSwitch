@@ -215,6 +215,9 @@ rate_limiting:
 logging:
   level: ${LOG_LEVEL:-info}        # debug | info | warn | error
   format: json
+  # All logs go here. The terminal only echoes logs from startup — it goes
+  # quiet once the service finishes booting (see internal/logging).
+  file: ${LOG_FILE:-../../logs/api-gateway.log}
   # Fields included in every log line
   default_fields:
     service: api-gateway

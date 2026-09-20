@@ -163,4 +163,8 @@ cython_debug/
 
 # Go build artifacts (demo tools under scripts/demo/ are built locally with `go build`)
 *.exe
+
+# Per-service log files (see services/*/internal/logging) — written to
+# repo-root logs/<service>.log by default (config/*.yaml logging.file)
 *.log
+/logs/

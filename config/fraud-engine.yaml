@@ -176,6 +176,9 @@ server:
 logging:
   level: ${LOG_LEVEL:-info}        # debug | info | warn | error
   format: json
+  # All logs go here. The terminal only echoes logs from startup — it goes
+  # quiet once the service finishes booting (see internal/logging).
+  file: ${LOG_FILE:-../../logs/fraud-engine.log}
   default_fields:
     service: fraud-engine
     version: ${SERVICE_VERSION:-unknown}

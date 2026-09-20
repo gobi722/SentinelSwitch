@@ -71,6 +71,7 @@ type PerformanceConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+	File   string `yaml:"file"`
 }
 
 // envVarRe matches ${VAR:-default} patterns.

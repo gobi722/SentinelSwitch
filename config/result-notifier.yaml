@@ -78,3 +78,6 @@ server:
 logging:
   level: ${LOG_LEVEL:-info}
   format: json
+  # All logs go here. The terminal only echoes logs from startup — it goes
+  # quiet once the service finishes booting (see internal/logging).
+  file: ${LOG_FILE:-../../logs/result-notifier.log}

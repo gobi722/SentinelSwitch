@@ -64,6 +64,7 @@ type PortConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
+	File   string `yaml:"file"`
 }
 
 func expandEnv(s string) string {

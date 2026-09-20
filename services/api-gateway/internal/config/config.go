@@ -188,6 +188,7 @@ type RateLimitingConfig struct {
 type LoggingConfig struct {
 	Level   string            `yaml:"level"`
 	Format  string            `yaml:"format"`
+	File    string            `yaml:"file"`
 	Default map[string]string `yaml:"default_fields"`
 }
 
