@@ -1,6 +1,7 @@
 # Design: External Multi-Tenant Result Delivery via Kafka
 
-**Status:** Implemented (uncommitted) — not yet tested end-to-end against a running stack
+**Status:** Implemented, committed, and verified end-to-end against a running local stack (see
+Verification below for what was actually confirmed and how).
 **Ticket:** CREDO-ALERT-001 (follow-on)
 
 ## Context
@@ -200,19 +201,49 @@ Documented as a runbook step, not a CRUD service — matches the confirmed scope
 
 1. **Build**: `go build ./...` in each modified/new service directory (api-gateway, fraud-engine,
    result-notifier) — must compile cleanly after `buf generate`.
+   ✅ **Confirmed.** All three run cleanly via `go run ./cmd` against the local stack; no build errors.
 2. **Provision a test client**: run `scripts/provision-client.sh test-client "Test Integrator"`, capture the
    printed API key + SCRAM password.
+   ✅ **Confirmed.** `test-client` provisioned — `api_clients` row, SCRAM credential, `results.test-client`
+   topic, and both ACLs (topic read + `test-client.`-prefixed group read) all created successfully.
 3. **Submit a transaction** via `grpcurl` with `x-api-key: <key>` metadata header set — confirm ACK.
    Submit once *without* the header — confirm `Unauthenticated`.
+   ✅ **Confirmed.** Multiple `SubmitTransaction` calls with a valid `x-api-key` returned `PENDING` + `txn_id`;
+   the same call with the header omitted returned `Unauthenticated: missing x-api-key`.
 4. **Confirm client_id propagation**: check Fraud Engine logs / the `fraud_results` topic payload has the
    correct `client_id`.
+   ✅ **Confirmed.** Decoded `FraudResultEvent` payloads (via `scripts/demo/decode-results`) show
+   `client_id: "test-client"` correctly mirrored through on every submitted transaction.
 5. **Confirm external delivery + isolation**: consume `results.test-client` using the SCRAM credentials on
    `localhost:9096` — the result should appear. Attempt to consume a *different* client's topic with
    `test-client`'s credentials — should be denied by the ACL.
+   ✅ **Confirmed.** `results.test-client` consumed successfully with `test-client`'s SCRAM credentials
+   (decoded results matched what was submitted). Attempting to read `results.some-other-client` with the
+   same credentials failed with `TOPIC_AUTHORIZATION_FAILED`, as expected.
 6. **Confirm fail-closed auth**: stop Redis and Postgres, retry a `SubmitTransaction` call — expect
    `UNAVAILABLE`, not a silently-accepted request.
+   ✅ **Confirmed, via a real-world variant.** A misconfigured `POSTGRES_PASSWORD` (auth failure connecting
+   to Postgres, logged as `password authentication failed for user "sentinel"`) correctly produced
+   `Unavailable: auth temporarily unavailable` rather than admitting the request — i.e. the backing-store
+   failure path fails closed as designed. The literal "stop the Redis/Postgres containers mid-flight" variant
+   has not been separately exercised, though it exercises the same code path.
 7. **Confirm unrouted DLQ**: manually publish a `fraud_results` message with an empty/garbage `client_id`
    directly to Kafka — confirm it lands in `results_unrouted_dlq`, not silently dropped.
+   ✅ **Confirmed.** Published a `FraudResultEvent` with `client_id: ""` directly to `fraud_results` — it
+   landed in `results_unrouted_dlq` with the full diagnostic header set (`dlq-original-topic: fraud_results`,
+   `dlq-original-partition`, `dlq-original-offset`, `dlq-failure-reason: unroutable_client_id`,
+   `dlq-retry-count: 0`, `dlq-failed-at`), same key as the original message, and the untouched original
+   payload as the value — matching the design exactly.
+   Note: `results_unrouted_dlq` did not already exist on the local broker (auto-create is disabled) — it had
+   to be created manually before this check could run. Without it, `result-notifier` would fail to DLQ (and
+   therefore never commit, retrying indefinitely) the first unroutable message it ever saw on a fresh
+   environment. This was a real gap in local-dev setup, now fixed: the topic-creation step has been added to
+   `docs/INFRASTRUCTURE_SETUP.md` §4.1 alongside `transaction_dlq`.
+
+All verified checks were run manually against the local `docker-compose` stack plus locally-run Go
+services (not yet exercised in CI or a deployed environment). A live client-facing demo of the delivery
+path (submit via Postman/grpcurl → decision arrives on the client's own `results.<client_id>` topic) was
+also built on top of this: see `scripts/demo/live-dashboard`.
 
 ---
 
