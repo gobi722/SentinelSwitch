@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SentinelSwitch — Live Results</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0f14;
+    --panel: #121821;
+    --panel-border: #1f2a37;
+    --text: #e7edf5;
+    --text-dim: #8a97a8;
+    --accent: #35d0a3;
+    --accent-dim: rgba(53, 208, 163, 0.15);
+    --decline: #ff5c6c;
+    --decline-dim: rgba(255, 92, 108, 0.15);
+    --review: #ffb547;
+    --review-dim: rgba(255, 181, 71, 0.15);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 12px var(--accent);
+  }
+  .brand h1 {
+    font-size: 19px;
+    font-weight: 650;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+    padding: 6px 12px;
+    border: 1px solid var(--panel-border);
+    border-radius: 999px;
+    background: var(--panel);
+  }
+  .status .pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 var(--accent-dim); }
+    50% { opacity: 0.6; box-shadow: 0 0 0 6px transparent; }
+  }
+  .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 14px 0 32px;
+    padding-bottom: 24px;
+    border-bottom: 1px solid var(--panel-border);
+  }
+  .subtitle b { color: var(--text); font-weight: 600; }
+  .subtitle code {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    padding: 1px 6px;
+    border-radius: 5px;
+    font-size: 12.5px;
+  }
+
+  .empty {
+    text-align: center;
+    padding: 70px 20px;
+    color: var(--text-dim);
+  }
+  .empty .icon {
+    font-size: 34px;
+    margin-bottom: 14px;
+    opacity: 0.5;
+  }
+  .empty .hint {
+    font-size: 13px;
+    margin-top: 6px;
+    color: #5c6779;
+  }
+
+  .feed {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 14px;
+    padding: 20px;
+    animation: slideIn 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .card.flash {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 24px -6px var(--accent);
+  }
+
+  .card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .amount {
+    font-size: 26px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+  }
+  .merchant {
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+  .badge {
+    flex-shrink: 0;
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: 0.02em;
+    padding: 6px 12px;
+    border-radius: 999px;
+    text-transform: uppercase;
+  }
+  .badge.approve { color: var(--accent); background: var(--accent-dim); }
+  .badge.decline { color: var(--decline); background: var(--decline-dim); }
+  .badge.review  { color: var(--review);  background: var(--review-dim); }
+
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 28px;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 16px;
+  }
+  .meta-row .item b {
+    color: var(--text);
+    font-weight: 600;
+    display: block;
+    font-size: 13.5px;
+    margin-top: 1px;
+  }
+  .meta-row .item span { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  .risk {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .risk-label { font-size: 12px; color: var(--text-dim); width: 70px; flex-shrink: 0; }
+  .risk-bar {
+    flex: 1;
+    height: 6px;
+    background: #1a222d;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .risk-fill { height: 100%; border-radius: 999px; }
+  .risk-value { font-size: 12.5px; font-weight: 600; width: 34px; text-align: right; flex-shrink: 0; }
+
+  .rules {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rule-chip {
+    font-size: 11.5px;
+    color: var(--text-dim);
+    background: #1a222d;
+    border: 1px solid var(--panel-border);
+    padding: 4px 9px;
+    border-radius: 6px;
+  }
+  .footer-row {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--panel-border);
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: #5c6779;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand">
+        <div class="dot"></div>
+        <h1>SentinelSwitch</h1>
+      </div>
+      <div class="status" id="status">
+        <div class="pulse"></div>
+        <span id="statusText">connecting…</span>
+      </div>
+    </header>
+
+    <div class="subtitle">
+      Live fraud decisions delivered to <b id="clientLabel">this client</b>'s own private Kafka
+      channel — <code id="topicLabel">results.&lt;client_id&gt;</code>. Broker-enforced access
+      control means no other integrator can read this feed. Submit a transaction to see a
+      decision arrive here in real time.
+    </div>
+
+    <div id="empty" class="empty">
+      <div class="icon">◎</div>
+      <div>Waiting for the first transaction…</div>
+      <div class="hint">Submit one via Postman/grpcurl — the decision will appear here within a couple of seconds.</div>
+    </div>
+
+    <div id="feed" class="feed"></div>
+  </div>
+
+<script>
+  const feed = document.getElementById('feed');
+  const emptyState = document.getElementById('empty');
+  const statusText = document.getElementById('statusText');
+  const clientLabel = document.getElementById('clientLabel');
+  const topicLabel = document.getElementById('topicLabel');
+
+  function decisionClass(decision) {
+    if (decision === 'DECLINE') return 'decline';
+    if (decision === 'REVIEW') return 'review';
+    return 'approve';
+  }
+  function riskColor(score) {
+    if (score >= 700) return 'var(--decline)';
+    if (score >= 400) return 'var(--review)';
+    return 'var(--accent)';
+  }
+  function fmtTime(iso) {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch { return iso; }
+  }
+
+  function renderCard(ev) {
+    emptyState.style.display = 'none';
+    const card = document.createElement('div');
+    card.className = 'card flash';
+    const dClass = decisionClass(ev.decision);
+    const rColor = riskColor(ev.riskScore);
+    const rules = (ev.triggeredRules || []).map(r => `<span class="rule-chip">${r}</span>`).join('');
+
+    card.innerHTML = `
+      <div class="card-top">
+        <div>
+          <div class="amount">${ev.amountDisplay}</div>
+          <div class="merchant">Merchant ${ev.merchantId} · Terminal ${ev.terminalId}</div>
+        </div>
+        <div class="badge ${dClass}">${ev.decision}</div>
+      </div>
+      <div class="meta-row">
+        <div class="item"><span>Transaction</span><b>${ev.txnId}</b></div>
+        <div class="item"><span>Processed</span><b>${fmtTime(ev.processedAt)}</b></div>
+      </div>
+      <div class="risk">
+        <div class="risk-label">Risk score</div>
+        <div class="risk-bar"><div class="risk-fill" style="width:${Math.min(ev.riskScore, 1000) / 10}%; background:${rColor};"></div></div>
+        <div class="risk-value">${ev.riskScore}</div>
+      </div>
+      ${rules ? `<div class="rules">${rules}</div>` : ''}
+      <div class="footer-row">
+        <span>Delivered to results.${ev.clientId}</span>
+        <span>SASL/SCRAM-authenticated · isolated by ACL</span>
+      </div>
+    `;
+    feed.prepend(card);
+    setTimeout(() => card.classList.remove('flash'), 1500);
+  }
+
+  const es = new EventSource('/events');
+  es.addEventListener('ready', (e) => {
+    const data = JSON.parse(e.data);
+    clientLabel.textContent = data.clientId;
+    topicLabel.textContent = data.topic;
+    statusText.textContent = 'live — listening on ' + data.topic;
+  });
+  es.onmessage = (e) => {
+    const ev = JSON.parse(e.data);
+    renderCard(ev);
+  };
+  es.onerror = () => {
+    statusText.textContent = 'reconnecting…';
+  };
+</script>
+</body>
+</html>

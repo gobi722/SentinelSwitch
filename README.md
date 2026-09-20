@@ -131,4 +131,4 @@ cd services/api-gateway      && go run ./cmd/main.go
 cd services/persistence-svc  && go run ./cmd/main.go
 ```
 
-> For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs-mine/SERVICE_RUN_GUIDE.md](docs-mine/SERVICE_RUN_GUIDE.md).
+> For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs-mine/SERVICE_RUN_GUIDE.md](docs/INFRASTRUCTURE_SETUP.md).
