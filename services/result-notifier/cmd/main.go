@@ -14,6 +14,7 @@ import (
 
 	"github.com/sentinelswitch/result-notifier/internal/config"
 	kafkapkg "github.com/sentinelswitch/result-notifier/internal/kafka"
+	"github.com/sentinelswitch/result-notifier/internal/logging"
 	"github.com/sentinelswitch/result-notifier/internal/pipeline"
 	"github.com/sentinelswitch/result-notifier/internal/router"
 )
@@ -31,12 +32,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	var logger *zap.Logger
-	if cfg.Logging.Format == "json" {
-		logger, err = zap.NewProduction()
-	} else {
-		logger, err = zap.NewDevelopment()
-	}
+	// Everything goes to cfg.Logging.File; the terminal only echoes
+	// startup-phase logs until stopConsole() is called further down.
+	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logger build failed: %v\n", err)
 		os.Exit(1)
@@ -57,8 +55,8 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Metrics.Port),
 		Handler: metricsMux,
 	}
+	logger.Info("metrics server listening", zap.Int("port", cfg.Server.Metrics.Port))
 	go func() {
-		logger.Info("metrics server listening", zap.Int("port", cfg.Server.Metrics.Port))
 		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("metrics server error", zap.Error(err))
 		}
@@ -74,8 +72,8 @@ func main() {
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Health.Port),
 		Handler: healthMux,
 	}
+	logger.Info("health server listening", zap.Int("port", cfg.Server.Health.Port))
 	go func() {
-		logger.Info("health server listening", zap.Int("port", cfg.Server.Health.Port))
 		if err := healthServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("health server error", zap.Error(err))
 		}
@@ -99,6 +97,11 @@ func main() {
 		zap.String("topic_prefix", cfg.Router.TopicPrefix),
 		zap.String("unrouted_dlq_topic", cfg.Kafka.DLQProducer.Topic),
 	)
+
+	// Startup is done — from here on, logs (including every message the
+	// pipeline processes) only go to cfg.Logging.File, not the terminal.
+	stopConsole()
+
 	proc.Run(ctx) //nolint:errcheck
 
 	logger.Info("result-notifier stopped")

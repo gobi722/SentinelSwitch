@@ -27,20 +27,12 @@ import (
 	"github.com/sentinelswitch/api-gateway/internal/hashing"
 	"github.com/sentinelswitch/api-gateway/internal/idempotency"
 	"github.com/sentinelswitch/api-gateway/internal/kafka"
+	"github.com/sentinelswitch/api-gateway/internal/logging"
 	"github.com/sentinelswitch/api-gateway/internal/ratelimit"
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
 )
 
 func main() {
-	// -------------------------------------------------------------------------
-	// Logger
-	// -------------------------------------------------------------------------
-	log, err := zap.NewProduction()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer log.Sync() //nolint:errcheck
 	godotenv.Load(".env")
 	// -------------------------------------------------------------------------
 	// Config
@@ -49,8 +41,20 @@ func main() {
 	redisPath := envOr("CONFIG_PATH", "../../config/redis.yaml")
 	cfg, err := config.Load(cfgPath, redisPath)
 	if err != nil {
-		log.Fatal("config load failed", zap.String("path", cfgPath), zap.Error(err))
+		fmt.Fprintf(os.Stderr, "config load failed: %v\n", err)
+		os.Exit(1)
 	}
+
+	// -------------------------------------------------------------------------
+	// Logger — everything goes to cfg.Logging.File; the terminal only echoes
+	// startup-phase logs until stopConsole() is called further down.
+	// -------------------------------------------------------------------------
+	log, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
+		os.Exit(1)
+	}
+	defer log.Sync() //nolint:errcheck
 	log.Info("config loaded", zap.String("path", cfgPath))
 
 	// -------------------------------------------------------------------------
@@ -191,19 +195,25 @@ func main() {
 	// -------------------------------------------------------------------------
 	// Start
 	// -------------------------------------------------------------------------
+	// Logged synchronously (not inside the goroutines below) so these are
+	// guaranteed to hit the terminal before stopConsole() takes effect.
+	log.Info("gRPC server starting", zap.Int("port", cfg.Server.GRPC.Port))
 	go func() {
-		log.Info("gRPC server starting", zap.Int("port", cfg.Server.GRPC.Port))
 		if err := grpcServer.Serve(grpcLis); err != nil {
 			log.Fatal("gRPC serve error", zap.Error(err))
 		}
 	}()
 
+	log.Info("HTTP server starting", zap.Int("port", cfg.Server.Metrics.Port))
 	go func() {
-		log.Info("HTTP server starting", zap.Int("port", cfg.Server.Metrics.Port))
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal("HTTP serve error", zap.Error(err))
 		}
 	}()
+
+	// Startup is done — from here on, logs (including every request the
+	// grpc_zap interceptor logs) only go to cfg.Logging.File, not the terminal.
+	stopConsole()
 
 	// -------------------------------------------------------------------------
 	// Graceful shutdown
