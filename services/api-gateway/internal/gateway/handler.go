@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,7 @@ import (
 	"github.com/sentinelswitch/api-gateway/internal/idempotency"
 	"github.com/sentinelswitch/api-gateway/internal/kafka"
 	"github.com/sentinelswitch/api-gateway/internal/ratelimit"
+	"github.com/sentinelswitch/api-gateway/internal/txnstatus"
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
 	transactionv1 "github.com/sentinelswitch/proto/transactions/v1"
 )
@@ -48,6 +50,7 @@ type Handler struct {
 	idempotency *idempotency.Store
 	producer    *kafka.Producer
 	rateLimiter *ratelimit.Limiter
+	txnStatus   *txnstatus.Store
 	log         *zap.Logger
 }
 
@@ -57,6 +60,7 @@ func NewHandler(
 	ids *idempotency.Store,
 	p *kafka.Producer,
 	rl *ratelimit.Limiter,
+	ts *txnstatus.Store,
 	log *zap.Logger,
 ) *Handler {
 	return &Handler{
@@ -65,6 +69,7 @@ func NewHandler(
 		idempotency: ids,
 		producer:    p,
 		rateLimiter: rl,
+		txnStatus:   ts,
 		log:         log,
 	}
 }
@@ -174,5 +179,50 @@ func (h *Handler) GetTransactionStatus(
 	if req.TxnId == "" {
 		return nil, status.Error(codes.InvalidArgument, "txn_id: required")
 	}
-	return nil, status.Error(codes.Unimplemented, "status queries must be directed to the transaction-processor service")
+
+	clientID, ok := auth.ClientIDFromContext(ctx)
+	if !ok {
+		// Should be unreachable — the auth interceptor rejects unauthenticated
+		// calls before the handler ever runs.
+		return nil, status.Error(codes.Internal, "missing verified client identity")
+	}
+
+	row, err := h.txnStatus.Lookup(ctx, req.TxnId, clientID)
+	if err != nil {
+		if errors.Is(err, txnstatus.ErrNotFound) {
+			// Deliberately identical response whether the txn_id is genuinely
+			// unknown, still being processed (no row exists until Fraud Engine
+			// decides), or belongs to a different client — distinguishing the
+			// last case would leak another tenant's transaction existence.
+			return &gatewayv1.TransactionStatusResponse{
+				TxnId:  req.TxnId,
+				Status: gatewayv1.TransactionStatus_PENDING,
+			}, nil
+		}
+		h.log.Error("txn status lookup failed", zap.String("txn_id", req.TxnId), zap.Error(err))
+		return nil, status.Error(codes.Unavailable, "status lookup temporarily unavailable")
+	}
+
+	resp := &gatewayv1.TransactionStatusResponse{
+		TxnId:       req.TxnId,
+		RiskScore:   row.RiskScore,
+		SubmittedAt: row.SubmittedAt.UTC().Format(time.RFC3339),
+	}
+	switch row.Decision {
+	case "APPROVED":
+		resp.Status = gatewayv1.TransactionStatus_APPROVED
+		resp.FraudDecision = "APPROVE"
+	case "DECLINED":
+		resp.Status = gatewayv1.TransactionStatus_DECLINED
+		resp.FraudDecision = "DECLINE"
+	case "REVIEW":
+		resp.Status = gatewayv1.TransactionStatus_REVIEW
+		resp.FraudDecision = "REVIEW"
+	default:
+		resp.Status = gatewayv1.TransactionStatus_ERROR
+	}
+	if !row.DecidedAt.IsZero() {
+		resp.DecidedAt = row.DecidedAt.UTC().Format(time.RFC3339)
+	}
+	return resp, nil
 }

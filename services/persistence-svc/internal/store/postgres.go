@@ -16,14 +16,15 @@ const upsertSQL = `
 INSERT INTO transactions (
     txn_id, card_hash, masked_pan, amount_minor, currency,
     merchant_id, terminal_id, mcc, transaction_type, channel, scheme, rrn,
-    txn_timestamp, status, risk_score, triggered_rules, decision, processed_at
-) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+    txn_timestamp, status, risk_score, triggered_rules, decision, processed_at, client_id
+) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 ON CONFLICT (txn_id, txn_timestamp) DO UPDATE SET
     status          = EXCLUDED.status,
     risk_score      = EXCLUDED.risk_score,
     triggered_rules = EXCLUDED.triggered_rules,
     decision        = EXCLUDED.decision,
     processed_at    = EXCLUDED.processed_at,
+    client_id       = EXCLUDED.client_id,
     updated_at      = NOW()`
 
 // Store wraps a pgxpool.Pool and provides batch upsert operations.
@@ -108,6 +109,7 @@ func (s *Store) UpsertBatch(ctx context.Context, events []*fraudpb.FraudResultEv
 			string(triggeredRulesJSON),
 			decisionStr,
 			processedAt,
+			ev.ClientId,
 		)
 	}
 
