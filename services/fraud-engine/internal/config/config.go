@@ -100,7 +100,7 @@ type PortConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`
 	Format string `yaml:"format"`
-	File   string `yaml:"file"`
+	Dir    string `yaml:"dir"`
 }
 
 // ── Decision thresholds ───────────────────────────────────────────────────────

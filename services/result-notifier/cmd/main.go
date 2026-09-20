@@ -32,9 +32,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Everything goes to cfg.Logging.File; the terminal only echoes
-	// startup-phase logs until stopConsole() is called further down.
-	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
+	// Everything goes to cfg.Logging.Dir (hourly-rotated); the terminal only
+	// echoes startup-phase logs until stopConsole() is called further down.
+	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.Dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logger build failed: %v\n", err)
 		os.Exit(1)
@@ -99,7 +99,7 @@ func main() {
 	)
 
 	// Startup is done — from here on, logs (including every message the
-	// pipeline processes) only go to cfg.Logging.File, not the terminal.
+	// pipeline processes) only go to cfg.Logging.Dir, not the terminal.
 	stopConsole()
 
 	proc.Run(ctx) //nolint:errcheck

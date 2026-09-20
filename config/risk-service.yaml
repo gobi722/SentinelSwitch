@@ -206,9 +206,10 @@ performance:
 logging:
   level: ${LOG_LEVEL:-info}
   format: json
-  # All logs go here. The terminal only echoes logs from startup — it goes
-  # quiet once the service finishes booting (see internal/logging).
-  file: ${LOG_FILE:-../../logs/risk-service.log}
+  # All logs go here, hourly-rotated: <dir>/YYYY/MM/DD/HH.log. The terminal
+  # only echoes logs from startup — it goes quiet once the service finishes
+  # booting (see internal/logging).
+  dir: ${LOG_DIR:-../../logs/risk-service}
   default_fields:
     service: risk-service
     version: ${SERVICE_VERSION:-unknown}

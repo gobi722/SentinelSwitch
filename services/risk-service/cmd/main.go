@@ -35,9 +35,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Everything goes to cfg.Logging.File; the terminal only echoes
-	// startup-phase logs until stopConsole() is called further down.
-	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
+	// Everything goes to cfg.Logging.Dir (hourly-rotated); the terminal only
+	// echoes startup-phase logs until stopConsole() is called further down.
+	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.Dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logger build failed: %v\n", err)
 		os.Exit(1)
@@ -106,9 +106,15 @@ func main() {
 
 	// Health server
 	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+	// Readiness: risk-service is stateless (a pure scoring function over its
+	// request payload) — it has no external dependency that could make it
+	// "up but not ready", so readiness legitimately mirrors liveness here.
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
 	})
 	healthServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Health.Port),
@@ -138,7 +144,7 @@ func main() {
 	)
 
 	// Startup is done — from here on, logs (including every request served)
-	// only go to cfg.Logging.File, not the terminal.
+	// only go to cfg.Logging.Dir, not the terminal.
 	stopConsole()
 
 	if err := grpcSrv.Serve(lis); err != nil {

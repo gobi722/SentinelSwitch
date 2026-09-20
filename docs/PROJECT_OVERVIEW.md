@@ -1,6 +1,13 @@
 # SentinelSwitch — Project Overview
 **Ticket:** CREDO-ALERT-001
 
+> **Note:** this document was written when the core pipeline (§1–7 below) was first built and
+> is still accurate for that part of the system. It predates API-key authentication and the
+> multi-tenant per-client Kafka result delivery (Result Notifier — a 5th service). For current,
+> maintained status see [README.md](../README.md) and
+> [docs/MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md). §8–9 below have been
+> updated to reflect actual current status rather than the original build plan.
+
 ---
 
 ## 1. What Is This System?
@@ -377,35 +384,42 @@ Eviction policy (per DB — strongly prefer separate Redis instances):
 **Key design decisions in protos:**
 - `amount` stored as `int64 amount_minor` everywhere — avoids float rounding errors (e.g. OMR has 3 decimal places)
 - Raw PAN never in any proto — only `card_hash` + `pan_last4`
-- `merchant_id` derived from JWT at gateway — clients cannot forge it
+- `merchant_id` is client-supplied business data (which merchant the transaction is *for*); the
+  caller's own identity (`client_id`) is derived server-side from an authenticated `x-api-key`
+  header — JWT was considered but never implemented; API-key auth was built instead (see
+  [MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md))
 - Each proto package is self-contained (enums redeclared per package — schema registry independence)
 
 ---
 
-## 8. What Has Been Built (Files Created)
+## 8. What Has Been Built
 
-| File | Status | What it defines |
+All 5 services are fully implemented (Go 1.25), not just configs/protos — this section originally
+described a pre-code snapshot; it now reflects actual status.
+
+| Component | Status | Notes |
 |---|---|---|
-| [config/kafka-topics.yaml](config/kafka-topics.yaml) | Done | 3 topics, partitions, retention, consumer group settings, producer defaults |
-| [config/redis.yaml](config/redis.yaml) | Done | Connection (cluster + standalone), idempotency, velocity, merchant risk, circuit breaker, memory sizing |
-| [config/fraud-rules.yaml](config/fraud-rules.yaml) | Done | 8 rules, 7 velocity checks, decision thresholds, feature vector definition, circuit breaker config |
-| [config/schema-registry.yaml](config/schema-registry.yaml) | Done | Schema registry config |
-| [proto/gateway.proto](proto/gateway.proto) | Done | GatewayService gRPC — SubmitTransaction, GetTransactionStatus |
-| [proto/transactions.proto](proto/transactions.proto) | Done | TransactionEvent Kafka message schema |
-| [proto/risk.proto](proto/risk.proto) | Done | RiskService gRPC — CalculateRisk request/response |
-| [proto/fraud_results.proto](proto/fraud_results.proto) | Done | FraudResultEvent Kafka message schema |
-| [db/migrations/001_create_transactions.sql](db/migrations/001_create_transactions.sql) | Done | PostgreSQL schema — partitioned table, indexes, upsert template, updated_at trigger |
+| API Gateway | Done | + API-key auth (fail-closed on Postgres/Redis outage), rate limiting, idempotency |
+| Fraud Engine | Done | Rules + velocity + circuit-breaker-protected Risk Service calls |
+| Risk Service | Done | Weighted linear scoring, stateless |
+| Persistence Service | Done | Batch upsert + DLQ on failure |
+| Result Notifier | Done | 5th service — per-client Kafka result delivery, added after this doc was written; see [MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md) |
+| Docker Compose (infra) | Done | Kafka (3 listeners incl. SASL/SCRAM), Redis, Postgres, Schema Registry, Prometheus, Grafana |
+| Prometheus + Grafana | Done | All 5 services scraped, dashboards for all 5 |
+| DB migrations | Done (001–003) | `api_clients` table (003) added for the auth work |
 
 ---
 
 ## 9. What Remains
 
-| Layer | What needs to be built |
+Current as of the multi-tenant/auth work — see also the README's own gap list if it has one at
+the time you're reading this, since that's the more frequently updated copy.
+
+| Layer | Gap |
 |---|---|
-| Service configs | `api-gateway.yaml`, `fraud-engine.yaml`, `persistence-svc.yaml`, `risk-service.yaml` |
-| Docker Compose | Full local stack (Kafka, ZooKeeper/KRaft, Redis Cluster, PostgreSQL, all services) |
-| Service code | API Gateway, Fraud Engine, Risk Service, Persistence Service (language TBD) |
-| Prometheus config | `prometheus.yml` — scrape targets per service |
-| Grafana dashboards | Fraud decision rates, rule trigger rates, risk score histogram, consumer lag |
-| Tests | Unit (rule engine logic), integration (full Kafka → FE → DB flow), failure scenarios |
-| DB migrations 002+ | Any schema evolution (indexes, new columns) |
+| Testing | No unit or integration tests exist for any service |
+| CI/CD | No `.github/workflows` — nothing automated verifies a build |
+| Deployment | No Kubernetes manifests; app services aren't containerized (Dockerfiles exist but were unverified until recently) |
+| API contract | `GetTransactionStatus` — see current implementation status in `services/api-gateway/internal/gateway/handler.go` |
+| Security | No TLS/mTLS anywhere (gRPC or the Kafka SASL listener) |
+| Onboarding | Client provisioning is a manual script (`scripts/provision-client.sh`), not self-service — a deliberate scope decision at current scale, not an oversight |

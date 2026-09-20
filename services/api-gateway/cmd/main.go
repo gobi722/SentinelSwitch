@@ -29,6 +29,7 @@ import (
 	"github.com/sentinelswitch/api-gateway/internal/kafka"
 	"github.com/sentinelswitch/api-gateway/internal/logging"
 	"github.com/sentinelswitch/api-gateway/internal/ratelimit"
+	"github.com/sentinelswitch/api-gateway/internal/txnstatus"
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
 )
 
@@ -46,10 +47,11 @@ func main() {
 	}
 
 	// -------------------------------------------------------------------------
-	// Logger — everything goes to cfg.Logging.File; the terminal only echoes
-	// startup-phase logs until stopConsole() is called further down.
+	// Logger — everything goes to cfg.Logging.Dir (hourly-rotated); the
+	// terminal only echoes startup-phase logs until stopConsole() is called
+	// further down.
 	// -------------------------------------------------------------------------
-	log, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
+	log, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.Dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to create logger: %v\n", err)
 		os.Exit(1)
@@ -100,6 +102,9 @@ func main() {
 		cfg.Auth.CacheTTLSeconds,
 	)
 
+	// GetTransactionStatus lookups — same Postgres pool as auth, different table.
+	txnStatusStore := txnstatus.NewStore(pgPool)
+
 	// Idempotency store (Redis)
 	idStore := idempotency.New(
 		cfg.Redis.Host,
@@ -147,7 +152,7 @@ func main() {
 	}
 
 	// Handler
-	handler := gateway.NewHandler(validator, hasher, idStore, producer, rl, log)
+	handler := gateway.NewHandler(validator, hasher, idStore, producer, rl, txnStatusStore, log)
 
 	// -------------------------------------------------------------------------
 	// gRPC server
@@ -185,6 +190,26 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+	// Readiness: unlike /healthz (always 200 once the process is up), this
+	// checks the backing stores auth depends on — a caller routed here while
+	// they're down would just get fail-closed Unavailable responses anyway.
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := authStore.Ping(ctx); err != nil {
+			http.Error(w, "postgres (auth store) unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := authCache.Ping(ctx); err != nil {
+			http.Error(w, "redis (auth cache) unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := idStore.Ping(ctx); err != nil {
+			http.Error(w, "redis (idempotency store) unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	})
 	httpSrv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Metrics.Port),
 		Handler:      mux,
@@ -212,7 +237,7 @@ func main() {
 	}()
 
 	// Startup is done — from here on, logs (including every request the
-	// grpc_zap interceptor logs) only go to cfg.Logging.File, not the terminal.
+	// grpc_zap interceptor logs) only go to cfg.Logging.Dir, not the terminal.
 	stopConsole()
 
 	// -------------------------------------------------------------------------

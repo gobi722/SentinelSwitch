@@ -34,9 +34,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Everything goes to cfg.Logging.File; the terminal only echoes
-	// startup-phase logs until stopConsole() is called further down.
-	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.File)
+	// Everything goes to cfg.Logging.Dir (hourly-rotated); the terminal only
+	// echoes startup-phase logs until stopConsole() is called further down.
+	logger, stopConsole, err := logging.New(cfg.Logging.Format, cfg.Logging.Level, cfg.Logging.Dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "logger build failed: %v\n", err)
 		os.Exit(1)
@@ -120,9 +120,20 @@ func main() {
 
 	// Health server
 	healthMux := http.NewServeMux()
-	healthMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	healthMux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
+	})
+	// Readiness: this service is just a Postgres writer — the one dependency
+	// that matters is whether it can actually reach the database.
+	healthMux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := pgStore.Ping(ctx); err != nil {
+			http.Error(w, "postgres unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	})
 	healthServer := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Server.Health.Port),
@@ -154,7 +165,7 @@ func main() {
 	)
 
 	// Startup is done — from here on, logs (including every message the
-	// pipeline processes) only go to cfg.Logging.File, not the terminal.
+	// pipeline processes) only go to cfg.Logging.Dir, not the terminal.
 	stopConsole()
 
 	proc.Run(ctx)

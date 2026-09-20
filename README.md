@@ -17,8 +17,9 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 - **API-key authentication**: every gRPC call is verified against a Postgres-backed client registry (Redis-cached), fails **closed** on any backing-store error — never silently admits unauthenticated traffic
 - **Multi-tenant result delivery**: each external caller gets a dedicated, SASL/SCRAM-authenticated Kafka topic (`results.<client_id>`) for their own fraud decisions — broker-enforced ACLs mean no caller can read another's data
 - **Resilience patterns**: circuit breaker for downstream gRPC calls, dead-letter queues for failed DB writes *and* unroutable results, idempotency via Redis
-- **Full observability**: Prometheus metrics per service, Grafana dashboards for TPS, fraud ratio, latency, and consumer lag
-- **Per-service file logging**: each service logs everything to its own file; the terminal only shows output during startup, so it stays readable during manual testing
+- **Full observability**: Prometheus metrics per service (all 5 scraped), Grafana dashboards for TPS, fraud ratio, latency, and consumer lag
+- **Liveness + readiness health checks**: `/healthz` (process is up) and `/readyz` (real dependencies — Postgres/Redis/etc. — are actually reachable) on every service
+- **Per-service rotating file logs**: each service logs everything to its own hourly-rotated file tree; the terminal only shows output during startup, so it stays readable during manual testing
 
 ---
 
@@ -56,7 +57,7 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 | Cache            | Redis           |
 | Metrics          | Prometheus      |
 | Visualization    | Grafana         |
-| Containerization | Docker (infra only — app services run locally; see [Known Limitations](#-known-limitations)) |
+| Containerization | Docker — infra via `docker compose`; all 5 services also have working Dockerfiles (build from the repo root, see below) though they aren't part of the compose stack |
 
 ---
 
@@ -64,7 +65,7 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 
 | # | Service | Role | Default ports |
 |---|---|---|---|
-| 1️⃣ | **API Gateway** | Authenticates callers (`x-api-key`), validates + hashes card data, checks idempotency, publishes to Kafka, returns immediate ACK | gRPC `50051` · metrics `9091` · health `8081` |
+| 1️⃣ | **API Gateway** | Authenticates callers (`x-api-key`), validates + hashes card data, checks idempotency, publishes to Kafka, returns immediate ACK; `GetTransactionStatus` polls the final decision, scoped to the caller's own `client_id` | gRPC `50051` · metrics `9091` · health `8081` |
 | 2️⃣ | **Fraud Engine** | Consumes transactions, runs rule-based + velocity fraud checks, calls Risk Service, publishes fraud results | metrics `9095` · health `8082` |
 | 3️⃣ | **Risk Service** | gRPC service computing a weighted risk score (100–1000) from the fraud feature vector | gRPC `50052` · metrics `9094` · health `8084` |
 | 4️⃣ | **Persistence Service** | Consumes fraud results, upserts into partitioned PostgreSQL tables, DLQs on failure | metrics `9093` · health `8083` |
@@ -97,8 +98,6 @@ Each service exports Prometheus metrics on its own `/metrics` endpoint, for exam
 - `sentinel_result_notifier_messages_routed_total`, `sentinel_result_notifier_unrouted_total` — Result Notifier (not labeled by `client_id` — unbounded cardinality risk)
 
 Prometheus scrapes metrics. Grafana dashboards visualize TPS, fraud detection ratio, gRPC latency, consumer lag, and DB write throughput.
-
-> Result Notifier isn't wired into `infra/prometheus/prometheus.yml` or given a Grafana dashboard yet — see [Known Limitations](#-known-limitations).
 
 ---
 
@@ -139,7 +138,7 @@ cd services/result-notifier  && go run ./cmd
 
 Each service loads a `.env` file from its own directory (via `godotenv`) if present — useful for `POSTGRES_PASSWORD`, `PAN_HASH_SECRET`, and other required secrets so you don't have to export them in every shell session.
 
-Each service logs everything to `logs/<service>.log` at the repo root; the terminal only shows output while the service is starting up, then goes quiet.
+Each service logs everything to an hourly-rotated file tree at `logs/<service>/YYYY/MM/DD/HH.log` (repo root); the terminal only shows output while the service is starting up, then goes quiet.
 
 ### 5️⃣ Provision a client and call the API
 
@@ -148,5 +147,15 @@ scripts/provision-client.sh my-test-client "My Test Integrator"
 ```
 
 This prints an API key (for `x-api-key` on `SubmitTransaction`) and SCRAM credentials (for consuming `results.my-test-client`) — see [Multi-Tenant Access & Result Delivery](#-multi-tenant-access--result-delivery) above.
+
+### 6️⃣ Build a container image (optional)
+
+Each service has a working `Dockerfile`, but the build context must be the **repo root** (not the service directory) — the `go.mod` replace directive and, for API Gateway, its default config both reach outside `services/<name>/`:
+
+```bash
+docker build -f services/api-gateway/Dockerfile -t sentinel-api-gateway .
+```
+
+Swap the service name in both places for the other 4. These images aren't part of `docker-compose.yml` — the app services are meant to run locally during development (see step 4).
 
 > For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md).
