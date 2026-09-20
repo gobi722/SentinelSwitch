@@ -1,21 +1,24 @@
 # SentinelSwitch
 
-![Go](https://img.shields.io/badge/Go-1.22-00ADD8?logo=go&logoColor=white)
+![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)
 ![Kafka](https://img.shields.io/badge/Kafka-Event--Driven-231F20?logo=apachekafka&logoColor=white)
 ![gRPC](https://img.shields.io/badge/gRPC-Protobuf-4285F4?logo=grpc&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 
-SentinelSwitch is a distributed, event-driven payment transaction and fraud monitoring platform built using Go.  
-It simulates a real-world payment switch architecture using Kafka, gRPC, PostgreSQL, Redis, Prometheus, Grafana, Docker, and Kubernetes.
+SentinelSwitch is a distributed, event-driven payment transaction and fraud monitoring platform built using Go.
+It simulates a real-world payment switch architecture using Kafka, gRPC, PostgreSQL, Redis, Prometheus, and Grafana, and exposes itself as a multi-tenant product — any authenticated external caller can submit transactions and receive their own fraud decisions back, isolated from every other caller.
 
-This project demonstrates scalable microservice architecture, real-time fraud scoring, async processing, and production-grade observability.
+This project demonstrates scalable microservice architecture, real-time fraud scoring, async processing, multi-tenant API design, and production-grade observability.
 
 ## ✨ Highlights
 
-- **4 independent Go microservices** communicating over Kafka (async) and gRPC (sync)
+- **5 independent Go microservices** communicating over Kafka (async) and gRPC (sync)
 - **Real-time fraud detection**: rule-based checks + Redis-backed velocity scoring + risk-scoring gRPC call, all under ~seconds of latency
-- **Resilience patterns**: circuit breaker for downstream gRPC calls, dead-letter queue for failed DB writes, idempotency via Redis
+- **API-key authentication**: every gRPC call is verified against a Postgres-backed client registry (Redis-cached), fails **closed** on any backing-store error — never silently admits unauthenticated traffic
+- **Multi-tenant result delivery**: each external caller gets a dedicated, SASL/SCRAM-authenticated Kafka topic (`results.<client_id>`) for their own fraud decisions — broker-enforced ACLs mean no caller can read another's data
+- **Resilience patterns**: circuit breaker for downstream gRPC calls, dead-letter queues for failed DB writes *and* unroutable results, idempotency via Redis
 - **Full observability**: Prometheus metrics per service, Grafana dashboards for TPS, fraud ratio, latency, and consumer lag
+- **Per-service file logging**: each service logs everything to its own file; the terminal only shows output during startup, so it stays readable during manual testing
 
 ---
 
@@ -23,15 +26,21 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 
 ```mermaid
 graph TD
-A[API Gateway] --> B[Kafka Transaction Topic]
-B --> C[Fraud Engine]
-B --> D[Persistence Service]
-C --> E[gRPC Risk Scoring]
-D --> F[PostgreSQL]
-C --> G[Kafka Fraud Result Topic]
+    Ext[External Caller] -->|gRPC + x-api-key| A[API Gateway]
+    A -->|verifies via| Auth[(Postgres api_clients<br/>+ Redis cache)]
+    A --> B[Kafka: transactions]
+    B --> C[Fraud Engine]
+    B --> D[Persistence Service]
+    C --> E[Risk Scoring gRPC]
+    D --> F[(PostgreSQL)]
+    C --> G[Kafka: fraud_results]
+    G --> D
+    G --> H[Result Notifier]
+    H -->|per-client topic| I[Kafka: results.client_id]
+    I -->|SASL/SCRAM, ACL-isolated| Ext
 ```
 
-All services expose Prometheus metrics → scraped by Prometheus → visualized in Grafana
+All services expose Prometheus metrics → scraped by Prometheus → visualized in Grafana.
 
 ---
 
@@ -41,40 +50,40 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 |------------------|-----------------|
 | Language         | Go (Golang)     |
 | API Layer        | gRPC (Protocol Buffers) |
-| Messaging        | Apache Kafka    |
+| Messaging        | Apache Kafka (multi-listener: plaintext internal + SASL/SCRAM external) |
 | RPC              | gRPC            |
 | Database         | PostgreSQL      |
 | Cache            | Redis           |
 | Metrics          | Prometheus      |
 | Visualization    | Grafana         |
-| Containerization | Docker          |
-| Orchestration    | Kubernetes      |
+| Containerization | Docker (infra only — app services run locally; see [Known Limitations](#-known-limitations)) |
 
 ---
 
 ## 🧱 Microservices
 
-### 1️⃣ API Gateway
-- Accepts transaction requests
-- Publishes to Kafka
-- Returns immediate acknowledgement
-- Exposes Prometheus metrics
+| # | Service | Role | Default ports |
+|---|---|---|---|
+| 1️⃣ | **API Gateway** | Authenticates callers (`x-api-key`), validates + hashes card data, checks idempotency, publishes to Kafka, returns immediate ACK | gRPC `50051` · metrics `9091` · health `8081` |
+| 2️⃣ | **Fraud Engine** | Consumes transactions, runs rule-based + velocity fraud checks, calls Risk Service, publishes fraud results | metrics `9095` · health `8082` |
+| 3️⃣ | **Risk Service** | gRPC service computing a weighted risk score (100–1000) from the fraud feature vector | gRPC `50052` · metrics `9094` · health `8084` |
+| 4️⃣ | **Persistence Service** | Consumes fraud results, upserts into partitioned PostgreSQL tables, DLQs on failure | metrics `9093` · health `8083` |
+| 5️⃣ | **Result Notifier** | Consumes fraud results and republishes each one, unmodified, to that caller's private `results.<client_id>` topic; unroutable results go to `results_unrouted_dlq` | metrics `9098` · health `8085` |
 
-### 2️⃣ Fraud Engine Service
-- Consumes transactions from Kafka
-- Performs rule-based + velocity fraud checks
-- Calls Risk Scoring service via gRPC
-- Publishes fraud result to Kafka
+---
 
-### 3️⃣ Risk Scoring Service
-- gRPC-based microservice
-- Calculates risk score (100–1000)
-- Simulates ML model scoring
+## 🔐 Multi-Tenant Access & Result Delivery
 
-### 4️⃣ Persistence Service
-- Consumes transaction + fraud results
-- Stores into PostgreSQL
-- Maintains partitioned transaction tables
+SentinelSwitch is built to work as an independent product for any external integrator, not just a fixed set of known clients:
+
+1. **Authentication** — every `SubmitTransaction` call must carry an `x-api-key` header. The API Gateway hashes it and looks it up against a Postgres `api_clients` registry (Redis-cached, 60 s TTL). A backing-store outage returns `UNAVAILABLE` — it never falls back to admitting the request.
+2. **Identity propagation** — the verified `client_id` (distinct from `merchant_id`, which identifies who the transaction is *for*) rides through `TransactionEvent` → `FraudResultEvent` untouched, so the final result always knows who it belongs to.
+3. **Isolated delivery** — Result Notifier republishes each `FraudResultEvent` to a dedicated `results.<client_id>` Kafka topic on a SASL/SCRAM-authenticated listener (`localhost:9096` in dev). Broker ACLs restrict each client's credentials to only their own topic and a `<client_id>.`-prefixed consumer-group namespace.
+4. **Onboarding** — new clients are provisioned with `scripts/provision-client.sh <client_id> <name>`, which creates the Postgres row, the Kafka SCRAM credential, the dedicated topic, and both ACLs, then prints the API key and SCRAM password once.
+
+Full design + verified test results: [docs/MULTI_TENANT_RESULT_DELIVERY.md](docs/MULTI_TENANT_RESULT_DELIVERY.md).
+
+**Demo tooling** (`scripts/demo/`): `decode-results` is a CLI that decodes a client's raw Kafka messages into readable JSON; `live-dashboard` is a local web page that streams a client's incoming fraud decisions in real time — built for showing "submit a transaction → decision arrives on your own private channel" to a non-technical audience without exposing gRPC/Kafka internals.
 
 ---
 
@@ -82,18 +91,14 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 
 Each service exports Prometheus metrics on its own `/metrics` endpoint, for example:
 
-- `sentinel_risk_requests_total`, `sentinel_risk_score_histogram` — Risk Scoring Service
+- `sentinel_risk_requests_total`, `sentinel_risk_score_histogram` — Risk Service
 - `fraud_engine_messages_processed_total`, `fraud_engine_processing_duration_seconds`, `fraud_engine_risk_call_errors_total` — Fraud Engine
 - `sentinel_persistence_upserts_total`, `sentinel_persistence_batch_size_histogram` — Persistence Service
+- `sentinel_result_notifier_messages_routed_total`, `sentinel_result_notifier_unrouted_total` — Result Notifier (not labeled by `client_id` — unbounded cardinality risk)
 
-Prometheus scrapes metrics.
-Grafana dashboards visualize:
+Prometheus scrapes metrics. Grafana dashboards visualize TPS, fraud detection ratio, gRPC latency, consumer lag, and DB write throughput.
 
-- TPS (Transactions per second)
-- Fraud detection ratio
-- gRPC latency
-- Consumer lag
-- DB write throughput
+> Result Notifier isn't wired into `infra/prometheus/prometheus.yml` or given a Grafana dashboard yet — see [Known Limitations](#-known-limitations).
 
 ---
 
@@ -108,7 +113,7 @@ cd sentinelswitch
 
 ### 2️⃣ Start infrastructure
 
-Docker Compose brings up Kafka, Zookeeper, Schema Registry, Redis, PostgreSQL, Prometheus, and Grafana:
+Docker Compose brings up Kafka (3 listeners: internal, external, and a SASL/SCRAM public listener for external result delivery), Zookeeper, Schema Registry, Redis, PostgreSQL, Prometheus, and Grafana:
 
 ```bash
 docker compose up -d
@@ -122,13 +127,26 @@ buf generate
 
 ### 4️⃣ Run the services
 
-Each Go microservice runs as its own binary (in separate terminals):
+Each Go microservice runs as its own binary (in separate terminals), from its own service directory — config paths are relative, so run `go run ./cmd`, not from inside `cmd/` itself:
 
 ```bash
-cd services/risk-service     && go run ./cmd/main.go
-cd services/fraud-engine     && go run ./cmd/main.go
-cd services/api-gateway      && go run ./cmd/main.go
-cd services/persistence-svc  && go run ./cmd/main.go
+cd services/risk-service     && go run ./cmd
+cd services/fraud-engine     && go run ./cmd
+cd services/api-gateway      && go run ./cmd
+cd services/persistence-svc  && go run ./cmd
+cd services/result-notifier  && go run ./cmd
 ```
 
-> For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs-mine/SERVICE_RUN_GUIDE.md](docs/INFRASTRUCTURE_SETUP.md).
+Each service loads a `.env` file from its own directory (via `godotenv`) if present — useful for `POSTGRES_PASSWORD`, `PAN_HASH_SECRET`, and other required secrets so you don't have to export them in every shell session.
+
+Each service logs everything to `logs/<service>.log` at the repo root; the terminal only shows output while the service is starting up, then goes quiet.
+
+### 5️⃣ Provision a client and call the API
+
+```bash
+scripts/provision-client.sh my-test-client "My Test Integrator"
+```
+
+This prints an API key (for `x-api-key` on `SubmitTransaction`) and SCRAM credentials (for consuming `results.my-test-client`) — see [Multi-Tenant Access & Result Delivery](#-multi-tenant-access--result-delivery) above.
+
+> For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md).
