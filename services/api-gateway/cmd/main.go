@@ -107,7 +107,7 @@ func main() {
 
 	// Idempotency store (Redis)
 	idStore := idempotency.New(
-		cfg.Redis.Host,
+		fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
 		cfg.Redis.Password,
 		cfg.Redis.DB,
 		cfg.Idempotency.KeyPrefix,

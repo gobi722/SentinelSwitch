@@ -256,8 +256,10 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 	if err := loadYAML(redisYAML, &redisWrapper); err != nil {
 		return nil, fmt.Errorf("redis.yaml: %w", err)
 	}
-	fmt.Println(redisWrapper)
 	cfg.Redis = RedisConfig{
+		Host: redisWrapper.Connection.Standalone.Host,
+		Port: redisWrapper.Connection.Standalone.Port,
+		DB:   redisWrapper.Connection.Standalone.DB,
 		Pool: redisWrapper.Connection.Pool,
 	}
 	cfg.Redis.Password = redisWrapper.Connection.Auth.Password
