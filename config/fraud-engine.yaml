@@ -27,7 +27,7 @@
 # -----------------------------------------------------------------------------
 kafka:
   brokers:
-    - localhost:9092
+    - ${KAFKA_BROKERS:-localhost:9092}
 
   consumer:
     group_id: fraud-engine-cg
@@ -67,10 +67,14 @@ kafka:
 # -----------------------------------------------------------------------------
 # REDIS — Fraud Engine uses DB 0 (velocity + merchant risk)
 #                                DB 2 (circuit breaker state)
-# Connection settings are inherited from redis.yaml at runtime.
-# This section declares which DBs this service accesses.
+# host/port/password use the same env var names as redis.yaml's standalone
+# block, but are read independently — fraud-engine's config.Load only parses
+# this file, it does not read redis.yaml.
 # -----------------------------------------------------------------------------
 redis:
+  host: ${REDIS_HOST:-localhost}
+  port: ${REDIS_PORT:-6379}
+  password: ${REDIS_PASSWORD:-}
   velocity_db:       0    # sorted sets: velocity:count:{rule}:{card_hash}
   merchant_risk_db:  0    # strings: merchant_risk:{merchant_id}
   circuit_breaker_db: 2   # strings: cb:risk_service:state / cb:risk_service:failures

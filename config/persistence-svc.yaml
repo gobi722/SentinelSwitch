@@ -28,7 +28,7 @@
 # -----------------------------------------------------------------------------
 kafka:
   brokers:
-    - localhost:9092
+    - ${KAFKA_BROKERS:-localhost:9092}
 
   consumer:
     group_id: persistence-svc-cg
