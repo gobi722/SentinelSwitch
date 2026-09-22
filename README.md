@@ -110,35 +110,51 @@ git clone https://github.com/gobi722/sentinelswitch.git
 cd sentinelswitch
 ```
 
-### 2️⃣ Start infrastructure
+### 2️⃣ Start everything
 
-Docker Compose brings up Kafka (3 listeners: internal, external, and a SASL/SCRAM public listener for external result delivery), Zookeeper, Schema Registry, Redis, PostgreSQL, Prometheus, and Grafana:
+Docker Compose brings up the full stack in dependency order: infrastructure — Kafka (3 listeners: internal, external, and a SASL/SCRAM public listener for external result delivery), Zookeeper, Schema Registry, Redis, PostgreSQL, Prometheus, Grafana — followed by all 5 app services (API Gateway, Fraud Engine, Risk Service, Persistence Service, Result Notifier), each built from its own `Dockerfile` and wired to the others via compose service DNS names:
 
 ```bash
 docker compose up -d
 ```
 
+Secrets (`PAN_HASH_SECRET`, `POSTGRES_PASSWORD`) are read from a root-level `.env` file, which is gitignored and not committed — create one locally before first run:
+
+```bash
+# .env (repo root)
+PAN_HASH_SECRET=dev_pan_hash_secret_for_testing
+POSTGRES_PASSWORD=sentinel_local_secret
+```
+
+Check everything came up healthy:
+
+```bash
+docker compose ps
+```
+
 ### 3️⃣ Generate protobuf code
+
+Only needed if you've changed a `.proto` file — regenerate before rebuilding any image that depends on it:
 
 ```bash
 buf generate
 ```
 
-### 4️⃣ Run the services
-
-Each Go microservice runs as its own binary (in separate terminals), from its own service directory — config paths are relative, so run `go run ./cmd`, not from inside `cmd/` itself:
+### 4️⃣ Rebuild a service after a code change
 
 ```bash
-cd services/risk-service     && go run ./cmd
-cd services/fraud-engine     && go run ./cmd
-cd services/api-gateway      && go run ./cmd
-cd services/persistence-svc  && go run ./cmd
-cd services/result-notifier  && go run ./cmd
+docker compose up --build -d fraud-engine   # rebuilds + restarts just that service
 ```
 
-Each service loads a `.env` file from its own directory (via `godotenv`) if present — useful for `POSTGRES_PASSWORD`, `PAN_HASH_SECRET`, and other required secrets so you don't have to export them in every shell session.
+For env-only changes (no code/config edits), skip `--build` — `docker compose up -d fraud-engine` alone recreates the container with the new environment (`docker compose restart` does **not** pick up env changes, since it reuses the existing container).
 
-Each service logs everything to an hourly-rotated file tree at `logs/<service>/YYYY/MM/DD/HH.log` (repo root); the terminal only shows output while the service is starting up, then goes quiet.
+> **Iterating on a single service outside Docker** (faster inner loop, no image rebuild) is still possible — run it as a bare Go binary from its own service directory, since config paths are relative to it, not to `cmd/`:
+> ```bash
+> cd services/fraud-engine && go run ./cmd
+> ```
+> Each service loads a `.env` from its own directory via `godotenv` if present. Point it at the Compose-published infra ports (`localhost:9092`, `localhost:5432`, etc.) rather than running the whole stack via Compose at the same time.
+
+Every service logs everything to an hourly-rotated file tree at `logs/<service>/YYYY/MM/DD/HH.log` (repo root); the terminal only shows output while the service is starting up, then goes quiet.
 
 ### 5️⃣ Provision a client and call the API
 
@@ -148,14 +164,14 @@ scripts/provision-client.sh my-test-client "My Test Integrator"
 
 This prints an API key (for `x-api-key` on `SubmitTransaction`) and SCRAM credentials (for consuming `results.my-test-client`) — see [Multi-Tenant Access & Result Delivery](#-multi-tenant-access--result-delivery) above.
 
-### 6️⃣ Build a container image (optional)
+### 6️⃣ Build a single image manually (optional)
 
-Each service has a working `Dockerfile`, but the build context must be the **repo root** (not the service directory) — the `go.mod` replace directive and, for API Gateway, its default config both reach outside `services/<name>/`:
+Each service has a working `Dockerfile`, but the build context must be the **repo root** (not the service directory) — the `go.mod` replace directive and each service's default config path both reach outside `services/<name>/`:
 
 ```bash
 docker build -f services/api-gateway/Dockerfile -t sentinel-api-gateway .
 ```
 
-Swap the service name in both places for the other 4. These images aren't part of `docker-compose.yml` — the app services are meant to run locally during development (see step 4).
+Swap the service name in both places for the other 4. Compose already builds and runs all 5 (step 2) — this is only useful for inspecting a single image in isolation.
 
 > For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md).

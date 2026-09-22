@@ -246,6 +246,8 @@ docker compose ps
 
 All services should show `healthy` before proceeding.
 
+> **App services are also in `docker-compose.yml`.** The current `docker-compose.yml` (repo root) additionally defines all 5 app services — `api-gateway`, `fraud-engine`, `risk-service`, `persistence-svc`, `result-notifier` — each built from its own `Dockerfile` (context: repo root) and wired to the infra above via compose service DNS names (`kafka:9093`, `postgres`, `schema-registry:8081`, `redis`). That block isn't duplicated here to avoid this doc drifting from the real file again — see `docker-compose.yml` directly for the authoritative service definitions, env vars, and port mappings. To bring up everything, infra + app services, just run `docker compose up -d` with no service names.
+
 ---
 
 ## 4. Kafka Setup
@@ -583,26 +585,26 @@ scrape_configs:
 
   - job_name: api-gateway
     static_configs:
-      - targets: ["host.docker.internal:9091"]
-    metrics_path: /metrics
+      - targets: ["api-gateway:9091"]
 
   - job_name: fraud-engine
     static_configs:
-      - targets: ["host.docker.internal:9095"]
-    metrics_path: /metrics
+      - targets: ["fraud-engine:9095"]
 
   - job_name: risk-service
     static_configs:
-      - targets: ["host.docker.internal:9094"]
-    metrics_path: /metrics
+      - targets: ["risk-service:9094"]
 
   - job_name: persistence-svc
     static_configs:
-      - targets: ["host.docker.internal:9093"]
-    metrics_path: /metrics
+      - targets: ["persistence-svc:9093"]
+
+  - job_name: result-notifier
+    static_configs:
+      - targets: ["result-notifier:9098"]
 ```
 
-> **Note:** `host.docker.internal` resolves to the host machine from inside Docker. Use actual service hostnames when running services inside Docker Compose.
+> **Note:** All 5 app services now run as their own Compose services (see `docker-compose.yml`), sharing a network with Prometheus — so targets use the compose service name directly (`api-gateway`, `fraud-engine`, etc.), which Docker's built-in DNS resolves to that container's IP. This replaced an earlier `host.docker.internal:<port>` setup from when the app services ran on the host instead of in Compose.
 
 ### 8.2 Service Metrics Ports
 
