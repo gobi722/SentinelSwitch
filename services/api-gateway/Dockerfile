@@ -56,8 +56,10 @@ COPY --from=builder /api-gateway /api-gateway
 
 # Default config path (override via CONFIG_PATH env or volume). main.go's
 # default CONFIG_PATH ("../../config/api-gateway.yaml") resolves from "/"
-# (this image's default WORKDIR) to exactly this path.
+# (this image's default WORKDIR) to exactly this path. main.go also loads
+# redis.yaml from the same default-resolved directory.
 COPY config/api-gateway.yaml /config/api-gateway.yaml
+COPY config/redis.yaml /config/redis.yaml
 
 # gRPC
 EXPOSE 50051
