@@ -34,6 +34,11 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /persistence-svc /persistence-svc
 
+# Default config path (override via CONFIG_PATH env or volume). main.go's
+# default CONFIG_PATH ("../../config/persistence-svc.yaml") resolves from
+# "/" (this image's default WORKDIR) to exactly this path.
+COPY config/persistence-svc.yaml /config/persistence-svc.yaml
+
 USER 65532:65532
 
 EXPOSE 9093 8083

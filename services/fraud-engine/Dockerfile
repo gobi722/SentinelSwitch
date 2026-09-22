@@ -34,6 +34,14 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /fraud-engine /fraud-engine
 
+# Default config path (override via CONFIG_PATH env or volume). main.go's
+# default CONFIG_PATH ("../../config/fraud-engine.yaml") resolves from "/"
+# (this image's default WORKDIR) to exactly this path. fraud-rules.yaml is
+# also needed — rules.config_file defaults to "config/fraud-rules.yaml",
+# which resolves the same way from "/".
+COPY config/fraud-engine.yaml /config/fraud-engine.yaml
+COPY config/fraud-rules.yaml /config/fraud-rules.yaml
+
 USER 65532:65532
 
 EXPOSE 9095 8082

@@ -34,6 +34,11 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /result-notifier /result-notifier
 
+# Default config path (override via CONFIG_PATH env or volume). main.go's
+# default CONFIG_PATH ("../../config/result-notifier.yaml") resolves from
+# "/" (this image's default WORKDIR) to exactly this path.
+COPY config/result-notifier.yaml /config/result-notifier.yaml
+
 USER 65532:65532
 
 EXPOSE 9098 8085

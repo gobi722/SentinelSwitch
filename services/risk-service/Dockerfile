@@ -34,6 +34,11 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
 COPY --from=builder /risk-service /risk-service
 
+# Default config path (override via CONFIG_PATH env or volume). main.go's
+# default CONFIG_PATH ("../../config/risk-service.yaml") resolves from "/"
+# (this image's default WORKDIR) to exactly this path.
+COPY config/risk-service.yaml /config/risk-service.yaml
+
 USER 65532:65532
 
 EXPOSE 50052 9094 8084
