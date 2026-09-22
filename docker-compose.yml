@@ -174,6 +174,147 @@ services:
       - sentinel-grafana-data:/var/lib/grafana
       - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
 
+  # ---------------------------------------------------------------------------
+  # Risk Service — gRPC scoring engine. No external deps (Fraud Engine is the
+  # only caller), so it just needs to be up before Fraud Engine starts.
+  # ---------------------------------------------------------------------------
+  risk-service:
+    build:
+      context: .
+      dockerfile: services/risk-service/Dockerfile
+    hostname: risk-service
+    container_name: sentinel-risk-service
+    ports:
+      - "50052:50052"
+      - "9094:9094"
+      - "8084:8084"
+    environment:
+      LOG_DIR: /logs/risk-service
+      DEPLOY_ENV: docker-compose
+    volumes:
+      - ./logs/risk-service:/logs/risk-service
+
+  # ---------------------------------------------------------------------------
+  # API Gateway — entry point. Publishes to Kafka topic `transactions`.
+  # ---------------------------------------------------------------------------
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    hostname: api-gateway
+    container_name: sentinel-api-gateway
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PAN_HASH_SECRET: ${PAN_HASH_SECRET}
+      REDIS_HOST: redis
+      LOG_DIR: /logs/api-gateway
+      DEPLOY_ENV: docker-compose
+    ports:
+      - "50051:50051"
+      - "9091:9091"
+      - "8086:8081"
+    volumes:
+      - ./logs/api-gateway:/logs/api-gateway
+
+  # ---------------------------------------------------------------------------
+  # Fraud Engine — consumes `transactions`, calls Risk Service, produces
+  # `fraud_results`.
+  # ---------------------------------------------------------------------------
+  fraud-engine:
+    build:
+      context: .
+      dockerfile: services/fraud-engine/Dockerfile
+    hostname: fraud-engine
+    container_name: sentinel-fraud-engine
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      risk-service:
+        condition: service_started
+    environment:
+      KAFKA_BROKERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      RISK_SERVICE_HOST: risk-service
+      REDIS_HOST: redis
+      LOG_DIR: /logs/fraud-engine
+      DEPLOY_ENV: docker-compose
+    ports:
+      - "9095:9095"
+      - "8082:8082"
+    volumes:
+      - ./logs/fraud-engine:/logs/fraud-engine
+
+  # ---------------------------------------------------------------------------
+  # Persistence Service — consumes `fraud_results`, upserts into PostgreSQL.
+  # ---------------------------------------------------------------------------
+  persistence-svc:
+    build:
+      context: .
+      dockerfile: services/persistence-svc/Dockerfile
+    hostname: persistence-svc
+    container_name: sentinel-persistence-svc
+    depends_on:
+      kafka:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      POSTGRES_HOST: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      LOG_DIR: /logs/persistence-svc
+      DEPLOY_ENV: docker-compose
+    ports:
+      - "9093:9093"
+      - "8083:8083"
+    volumes:
+      - ./logs/persistence-svc:/logs/persistence-svc
+
+  # ---------------------------------------------------------------------------
+  # Result Notifier — consumes `fraud_results`, republishes to
+  # `results.<client_id>` (or `results_unrouted_dlq`).
+  # ---------------------------------------------------------------------------
+  result-notifier:
+    build:
+      context: .
+      dockerfile: services/result-notifier/Dockerfile
+    hostname: result-notifier
+    container_name: sentinel-result-notifier
+    depends_on:
+      kafka:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+    environment:
+      KAFKA_BROKERS: kafka:9093
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      LOG_DIR: /logs/result-notifier
+      DEPLOY_ENV: docker-compose
+    ports:
+      - "9098:9098"
+      - "8085:8085"
+    volumes:
+      - ./logs/result-notifier:/logs/result-notifier
+
 # ---------------------------------------------------------------------------
 # Named volumes — must be declared here
 # ---------------------------------------------------------------------------
