@@ -47,9 +47,56 @@ service GatewayService {
     rpc SubmitTransaction (TransactionRequest) returns (TransactionAck);
 
     // Poll the fraud decision for a previously submitted transaction.
-    // Returns NOT_FOUND if the txn_id is unknown or has expired from cache.
-    // SLA: P99 < 30 ms (Redis cache read).
+    // Deliberately does NOT return NOT_FOUND: an unknown txn_id, a txn_id
+    // still awaiting a fraud decision, and a txn_id that belongs to a
+    // different caller are all indistinguishable from the outside — all
+    // three return status=PENDING. Distinguishing "unknown" from "not yours"
+    // would leak another tenant's transaction existence to this caller.
     rpc GetTransactionStatus (StatusRequest) returns (TransactionStatusResponse);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AdminService — client onboarding
+//
+// Deliberately a separate service (not a GatewayService RPC) so it is
+// trivially distinguishable from the client-facing surface above: it is
+// exempt from the per-client x-api-key interceptor (see
+// internal/auth/interceptor.go's admin-service prefix exemption) and instead
+// requires its own "x-admin-key" metadata header — a higher-privilege,
+// operator-only secret, never issued to external callers.
+//
+// This automates what scripts/provision-client.sh already did by hand:
+// creating the API key, the Kafka SCRAM-SHA-256 credential, the dedicated
+// results.<client_id> topic, and the ACLs scoping that credential to only
+// that topic + a <client_id>.-prefixed consumer-group namespace. See
+// docs/MULTI_TENANT_RESULT_DELIVERY.md for the full design.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service AdminService {
+
+    // Onboards a new external API client. Requires "x-admin-key" metadata.
+    // Returns ALREADY_EXISTS if client_id is taken, INVALID_ARGUMENT if
+    // client_id fails ^[a-zA-Z0-9._-]{1,200}$ (it is used verbatim as a Kafka
+    // topic-name component), PERMISSION_DENIED/UNAUTHENTICATED for a bad or
+    // missing admin key.
+    //
+    // api_key and scram_password in the response are returned in plaintext
+    // exactly once — neither is stored anywhere after this call returns.
+    rpc ProvisionClient (ProvisionClientRequest) returns (ProvisionClientResponse);
+}
+
+message ProvisionClientRequest {
+    string client_id    = 1;  // must match ^[a-zA-Z0-9._-]{1,200}$
+    string display_name = 2;
+}
+
+message ProvisionClientResponse {
+    string client_id             = 1;
+    string api_key                = 2;  // use as gRPC metadata "x-api-key" on GatewayService calls
+    string kafka_topic            = 3;  // results.<client_id>
+    string scram_username         = 4;  // == client_id
+    string scram_password         = 5;  // SASL/SCRAM-SHA-256, for the PUBLIC listener (localhost:9096 in dev)
+    string consumer_group_prefix  = 6;  // caller-chosen consumer group IDs must start with this
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -188,7 +235,6 @@ enum Channel {
 //   UNAUTHENTICATED     — missing or invalid x-api-key
 //   PERMISSION_DENIED   — API key belongs to a suspended/inactive client
 //   ALREADY_EXISTS      — duplicate idempotency_key within 24 h window
-//   NOT_FOUND           — txn_id unknown or expired (GetTransactionStatus)
 //   RESOURCE_EXHAUSTED  — rate limit exceeded for this caller
 //   INTERNAL            — unexpected server error (safe to retry with backoff)
 //   UNAVAILABLE         — Kafka, Redis, or Postgres temporarily unreachable

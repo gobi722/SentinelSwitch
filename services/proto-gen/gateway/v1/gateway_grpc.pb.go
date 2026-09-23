@@ -60,8 +60,11 @@ type GatewayServiceClient interface {
 	// SLA: P99 < 50 ms (gateway only — excludes async fraud processing).
 	SubmitTransaction(ctx context.Context, in *TransactionRequest, opts ...grpc.CallOption) (*TransactionAck, error)
 	// Poll the fraud decision for a previously submitted transaction.
-	// Returns NOT_FOUND if the txn_id is unknown or has expired from cache.
-	// SLA: P99 < 30 ms (Redis cache read).
+	// Deliberately does NOT return NOT_FOUND: an unknown txn_id, a txn_id
+	// still awaiting a fraud decision, and a txn_id that belongs to a
+	// different caller are all indistinguishable from the outside — all
+	// three return status=PENDING. Distinguishing "unknown" from "not yours"
+	// would leak another tenant's transaction existence to this caller.
 	GetTransactionStatus(ctx context.Context, in *StatusRequest, opts ...grpc.CallOption) (*TransactionStatusResponse, error)
 }
 
@@ -102,8 +105,11 @@ type GatewayServiceServer interface {
 	// SLA: P99 < 50 ms (gateway only — excludes async fraud processing).
 	SubmitTransaction(context.Context, *TransactionRequest) (*TransactionAck, error)
 	// Poll the fraud decision for a previously submitted transaction.
-	// Returns NOT_FOUND if the txn_id is unknown or has expired from cache.
-	// SLA: P99 < 30 ms (Redis cache read).
+	// Deliberately does NOT return NOT_FOUND: an unknown txn_id, a txn_id
+	// still awaiting a fraud decision, and a txn_id that belongs to a
+	// different caller are all indistinguishable from the outside — all
+	// three return status=PENDING. Distinguishing "unknown" from "not yours"
+	// would leak another tenant's transaction existence to this caller.
 	GetTransactionStatus(context.Context, *StatusRequest) (*TransactionStatusResponse, error)
 }
 
@@ -190,6 +196,122 @@ var GatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetTransactionStatus",
 			Handler:    _GatewayService_GetTransactionStatus_Handler,
+		},
+	},
+	Streams:  []grpc.StreamDesc{},
+	Metadata: "proto/gateway.proto",
+}
+
+const (
+	AdminService_ProvisionClient_FullMethodName = "/sentinel.gateway.v1.AdminService/ProvisionClient"
+)
+
+// AdminServiceClient is the client API for AdminService service.
+//
+// For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
+type AdminServiceClient interface {
+	// Onboards a new external API client. Requires "x-admin-key" metadata.
+	// Returns ALREADY_EXISTS if client_id is taken, INVALID_ARGUMENT if
+	// client_id fails ^[a-zA-Z0-9._-]{1,200}$ (it is used verbatim as a Kafka
+	// topic-name component), PERMISSION_DENIED/UNAUTHENTICATED for a bad or
+	// missing admin key.
+	//
+	// api_key and scram_password in the response are returned in plaintext
+	// exactly once — neither is stored anywhere after this call returns.
+	ProvisionClient(ctx context.Context, in *ProvisionClientRequest, opts ...grpc.CallOption) (*ProvisionClientResponse, error)
+}
+
+type adminServiceClient struct {
+	cc grpc.ClientConnInterface
+}
+
+func NewAdminServiceClient(cc grpc.ClientConnInterface) AdminServiceClient {
+	return &adminServiceClient{cc}
+}
+
+func (c *adminServiceClient) ProvisionClient(ctx context.Context, in *ProvisionClientRequest, opts ...grpc.CallOption) (*ProvisionClientResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ProvisionClientResponse)
+	err := c.cc.Invoke(ctx, AdminService_ProvisionClient_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// AdminServiceServer is the server API for AdminService service.
+// All implementations should embed UnimplementedAdminServiceServer
+// for forward compatibility.
+type AdminServiceServer interface {
+	// Onboards a new external API client. Requires "x-admin-key" metadata.
+	// Returns ALREADY_EXISTS if client_id is taken, INVALID_ARGUMENT if
+	// client_id fails ^[a-zA-Z0-9._-]{1,200}$ (it is used verbatim as a Kafka
+	// topic-name component), PERMISSION_DENIED/UNAUTHENTICATED for a bad or
+	// missing admin key.
+	//
+	// api_key and scram_password in the response are returned in plaintext
+	// exactly once — neither is stored anywhere after this call returns.
+	ProvisionClient(context.Context, *ProvisionClientRequest) (*ProvisionClientResponse, error)
+}
+
+// UnimplementedAdminServiceServer should be embedded to have
+// forward compatible implementations.
+//
+// NOTE: this should be embedded by value instead of pointer to avoid a nil
+// pointer dereference when methods are called.
+type UnimplementedAdminServiceServer struct{}
+
+func (UnimplementedAdminServiceServer) ProvisionClient(context.Context, *ProvisionClientRequest) (*ProvisionClientResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProvisionClient not implemented")
+}
+func (UnimplementedAdminServiceServer) testEmbeddedByValue() {}
+
+// UnsafeAdminServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to AdminServiceServer will
+// result in compilation errors.
+type UnsafeAdminServiceServer interface {
+	mustEmbedUnimplementedAdminServiceServer()
+}
+
+func RegisterAdminServiceServer(s grpc.ServiceRegistrar, srv AdminServiceServer) {
+	// If the following call panics, it indicates UnimplementedAdminServiceServer was
+	// embedded by pointer and is nil.  This will cause panics if an
+	// unimplemented method is ever invoked, so we test this at initialization
+	// time to prevent it from happening at runtime later due to I/O.
+	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
+		t.testEmbeddedByValue()
+	}
+	s.RegisterService(&AdminService_ServiceDesc, srv)
+}
+
+func _AdminService_ProvisionClient_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionClientRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminServiceServer).ProvisionClient(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AdminService_ProvisionClient_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminServiceServer).ProvisionClient(ctx, req.(*ProvisionClientRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+// AdminService_ServiceDesc is the grpc.ServiceDesc for AdminService service.
+// It's only intended for direct use with grpc.RegisterService,
+// and not to be introspected or modified (even as a copy)
+var AdminService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "sentinel.gateway.v1.AdminService",
+	HandlerType: (*AdminServiceServer)(nil),
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "ProvisionClient",
+			Handler:    _AdminService_ProvisionClient_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

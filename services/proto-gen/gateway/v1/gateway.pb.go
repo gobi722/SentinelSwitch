@@ -211,6 +211,142 @@ func (Channel) EnumDescriptor() ([]byte, []int) {
 	return file_proto_gateway_proto_rawDescGZIP(), []int{2}
 }
 
+type ProvisionClientRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"` // must match ^[a-zA-Z0-9._-]{1,200}$
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ProvisionClientRequest) Reset() {
+	*x = ProvisionClientRequest{}
+	mi := &file_proto_gateway_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionClientRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionClientRequest) ProtoMessage() {}
+
+func (x *ProvisionClientRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_gateway_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionClientRequest.ProtoReflect.Descriptor instead.
+func (*ProvisionClientRequest) Descriptor() ([]byte, []int) {
+	return file_proto_gateway_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ProvisionClientRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ProvisionClientRequest) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+type ProvisionClientResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	ClientId            string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ApiKey              string                 `protobuf:"bytes,2,opt,name=api_key,json=apiKey,proto3" json:"api_key,omitempty"`                                          // use as gRPC metadata "x-api-key" on GatewayService calls
+	KafkaTopic          string                 `protobuf:"bytes,3,opt,name=kafka_topic,json=kafkaTopic,proto3" json:"kafka_topic,omitempty"`                              // results.<client_id>
+	ScramUsername       string                 `protobuf:"bytes,4,opt,name=scram_username,json=scramUsername,proto3" json:"scram_username,omitempty"`                     // == client_id
+	ScramPassword       string                 `protobuf:"bytes,5,opt,name=scram_password,json=scramPassword,proto3" json:"scram_password,omitempty"`                     // SASL/SCRAM-SHA-256, for the PUBLIC listener (localhost:9096 in dev)
+	ConsumerGroupPrefix string                 `protobuf:"bytes,6,opt,name=consumer_group_prefix,json=consumerGroupPrefix,proto3" json:"consumer_group_prefix,omitempty"` // caller-chosen consumer group IDs must start with this
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *ProvisionClientResponse) Reset() {
+	*x = ProvisionClientResponse{}
+	mi := &file_proto_gateway_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ProvisionClientResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ProvisionClientResponse) ProtoMessage() {}
+
+func (x *ProvisionClientResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_gateway_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ProvisionClientResponse.ProtoReflect.Descriptor instead.
+func (*ProvisionClientResponse) Descriptor() ([]byte, []int) {
+	return file_proto_gateway_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ProvisionClientResponse) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *ProvisionClientResponse) GetApiKey() string {
+	if x != nil {
+		return x.ApiKey
+	}
+	return ""
+}
+
+func (x *ProvisionClientResponse) GetKafkaTopic() string {
+	if x != nil {
+		return x.KafkaTopic
+	}
+	return ""
+}
+
+func (x *ProvisionClientResponse) GetScramUsername() string {
+	if x != nil {
+		return x.ScramUsername
+	}
+	return ""
+}
+
+func (x *ProvisionClientResponse) GetScramPassword() string {
+	if x != nil {
+		return x.ScramPassword
+	}
+	return ""
+}
+
+func (x *ProvisionClientResponse) GetConsumerGroupPrefix() string {
+	if x != nil {
+		return x.ConsumerGroupPrefix
+	}
+	return ""
+}
+
 type TransactionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ------------------------------------------------------------------
@@ -261,7 +397,7 @@ type TransactionRequest struct {
 
 func (x *TransactionRequest) Reset() {
 	*x = TransactionRequest{}
-	mi := &file_proto_gateway_proto_msgTypes[0]
+	mi := &file_proto_gateway_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -273,7 +409,7 @@ func (x *TransactionRequest) String() string {
 func (*TransactionRequest) ProtoMessage() {}
 
 func (x *TransactionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_gateway_proto_msgTypes[0]
+	mi := &file_proto_gateway_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -286,7 +422,7 @@ func (x *TransactionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransactionRequest.ProtoReflect.Descriptor instead.
 func (*TransactionRequest) Descriptor() ([]byte, []int) {
-	return file_proto_gateway_proto_rawDescGZIP(), []int{0}
+	return file_proto_gateway_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *TransactionRequest) GetPanLast4() string {
@@ -382,7 +518,7 @@ type TransactionAck struct {
 
 func (x *TransactionAck) Reset() {
 	*x = TransactionAck{}
-	mi := &file_proto_gateway_proto_msgTypes[1]
+	mi := &file_proto_gateway_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -394,7 +530,7 @@ func (x *TransactionAck) String() string {
 func (*TransactionAck) ProtoMessage() {}
 
 func (x *TransactionAck) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_gateway_proto_msgTypes[1]
+	mi := &file_proto_gateway_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -407,7 +543,7 @@ func (x *TransactionAck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransactionAck.ProtoReflect.Descriptor instead.
 func (*TransactionAck) Descriptor() ([]byte, []int) {
-	return file_proto_gateway_proto_rawDescGZIP(), []int{1}
+	return file_proto_gateway_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TransactionAck) GetTxnId() string {
@@ -440,7 +576,7 @@ type StatusRequest struct {
 
 func (x *StatusRequest) Reset() {
 	*x = StatusRequest{}
-	mi := &file_proto_gateway_proto_msgTypes[2]
+	mi := &file_proto_gateway_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -452,7 +588,7 @@ func (x *StatusRequest) String() string {
 func (*StatusRequest) ProtoMessage() {}
 
 func (x *StatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_gateway_proto_msgTypes[2]
+	mi := &file_proto_gateway_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -465,7 +601,7 @@ func (x *StatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusRequest.ProtoReflect.Descriptor instead.
 func (*StatusRequest) Descriptor() ([]byte, []int) {
-	return file_proto_gateway_proto_rawDescGZIP(), []int{2}
+	return file_proto_gateway_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *StatusRequest) GetTxnId() string {
@@ -492,7 +628,7 @@ type TransactionStatusResponse struct {
 
 func (x *TransactionStatusResponse) Reset() {
 	*x = TransactionStatusResponse{}
-	mi := &file_proto_gateway_proto_msgTypes[3]
+	mi := &file_proto_gateway_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -504,7 +640,7 @@ func (x *TransactionStatusResponse) String() string {
 func (*TransactionStatusResponse) ProtoMessage() {}
 
 func (x *TransactionStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_gateway_proto_msgTypes[3]
+	mi := &file_proto_gateway_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -517,7 +653,7 @@ func (x *TransactionStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TransactionStatusResponse.ProtoReflect.Descriptor instead.
 func (*TransactionStatusResponse) Descriptor() ([]byte, []int) {
-	return file_proto_gateway_proto_rawDescGZIP(), []int{3}
+	return file_proto_gateway_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *TransactionStatusResponse) GetTxnId() string {
@@ -566,7 +702,18 @@ var File_proto_gateway_proto protoreflect.FileDescriptor
 
 const file_proto_gateway_proto_rawDesc = "" +
 	"\n" +
-	"\x13proto/gateway.proto\x12\x13sentinel.gateway.v1\"\xb4\x03\n" +
+	"\x13proto/gateway.proto\x12\x13sentinel.gateway.v1\"X\n" +
+	"\x16ProvisionClientRequest\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\"\xf2\x01\n" +
+	"\x17ProvisionClientResponse\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x17\n" +
+	"\aapi_key\x18\x02 \x01(\tR\x06apiKey\x12\x1f\n" +
+	"\vkafka_topic\x18\x03 \x01(\tR\n" +
+	"kafkaTopic\x12%\n" +
+	"\x0escram_username\x18\x04 \x01(\tR\rscramUsername\x12%\n" +
+	"\x0escram_password\x18\x05 \x01(\tR\rscramPassword\x122\n" +
+	"\x15consumer_group_prefix\x18\x06 \x01(\tR\x13consumerGroupPrefix\"\xb4\x03\n" +
 	"\x12TransactionRequest\x12\x1b\n" +
 	"\tpan_last4\x18\x01 \x01(\tR\bpanLast4\x12\x1f\n" +
 	"\vcard_expiry\x18\x02 \x01(\tR\n" +
@@ -619,7 +766,9 @@ const file_proto_gateway_proto_rawDesc = "" +
 	"\x02PG\x10\x022\xdf\x01\n" +
 	"\x0eGatewayService\x12a\n" +
 	"\x11SubmitTransaction\x12'.sentinel.gateway.v1.TransactionRequest\x1a#.sentinel.gateway.v1.TransactionAck\x12j\n" +
-	"\x14GetTransactionStatus\x12\".sentinel.gateway.v1.StatusRequest\x1a..sentinel.gateway.v1.TransactionStatusResponseB[\n" +
+	"\x14GetTransactionStatus\x12\".sentinel.gateway.v1.StatusRequest\x1a..sentinel.gateway.v1.TransactionStatusResponse2|\n" +
+	"\fAdminService\x12l\n" +
+	"\x0fProvisionClient\x12+.sentinel.gateway.v1.ProvisionClientRequest\x1a,.sentinel.gateway.v1.ProvisionClientResponseB[\n" +
 	"\x1dcom.sentinelswitch.gateway.v1B\fGatewayProtoP\x01Z*github.com/sentinelswitch/proto/gateway/v1b\x06proto3"
 
 var (
@@ -635,27 +784,31 @@ func file_proto_gateway_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_gateway_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_proto_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_proto_gateway_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_proto_gateway_proto_goTypes = []any{
 	(TransactionStatus)(0),            // 0: sentinel.gateway.v1.TransactionStatus
 	(TransactionType)(0),              // 1: sentinel.gateway.v1.TransactionType
 	(Channel)(0),                      // 2: sentinel.gateway.v1.Channel
-	(*TransactionRequest)(nil),        // 3: sentinel.gateway.v1.TransactionRequest
-	(*TransactionAck)(nil),            // 4: sentinel.gateway.v1.TransactionAck
-	(*StatusRequest)(nil),             // 5: sentinel.gateway.v1.StatusRequest
-	(*TransactionStatusResponse)(nil), // 6: sentinel.gateway.v1.TransactionStatusResponse
+	(*ProvisionClientRequest)(nil),    // 3: sentinel.gateway.v1.ProvisionClientRequest
+	(*ProvisionClientResponse)(nil),   // 4: sentinel.gateway.v1.ProvisionClientResponse
+	(*TransactionRequest)(nil),        // 5: sentinel.gateway.v1.TransactionRequest
+	(*TransactionAck)(nil),            // 6: sentinel.gateway.v1.TransactionAck
+	(*StatusRequest)(nil),             // 7: sentinel.gateway.v1.StatusRequest
+	(*TransactionStatusResponse)(nil), // 8: sentinel.gateway.v1.TransactionStatusResponse
 }
 var file_proto_gateway_proto_depIdxs = []int32{
 	1, // 0: sentinel.gateway.v1.TransactionRequest.transaction_type:type_name -> sentinel.gateway.v1.TransactionType
 	2, // 1: sentinel.gateway.v1.TransactionRequest.channel:type_name -> sentinel.gateway.v1.Channel
 	0, // 2: sentinel.gateway.v1.TransactionAck.status:type_name -> sentinel.gateway.v1.TransactionStatus
 	0, // 3: sentinel.gateway.v1.TransactionStatusResponse.status:type_name -> sentinel.gateway.v1.TransactionStatus
-	3, // 4: sentinel.gateway.v1.GatewayService.SubmitTransaction:input_type -> sentinel.gateway.v1.TransactionRequest
-	5, // 5: sentinel.gateway.v1.GatewayService.GetTransactionStatus:input_type -> sentinel.gateway.v1.StatusRequest
-	4, // 6: sentinel.gateway.v1.GatewayService.SubmitTransaction:output_type -> sentinel.gateway.v1.TransactionAck
-	6, // 7: sentinel.gateway.v1.GatewayService.GetTransactionStatus:output_type -> sentinel.gateway.v1.TransactionStatusResponse
-	6, // [6:8] is the sub-list for method output_type
-	4, // [4:6] is the sub-list for method input_type
+	5, // 4: sentinel.gateway.v1.GatewayService.SubmitTransaction:input_type -> sentinel.gateway.v1.TransactionRequest
+	7, // 5: sentinel.gateway.v1.GatewayService.GetTransactionStatus:input_type -> sentinel.gateway.v1.StatusRequest
+	3, // 6: sentinel.gateway.v1.AdminService.ProvisionClient:input_type -> sentinel.gateway.v1.ProvisionClientRequest
+	6, // 7: sentinel.gateway.v1.GatewayService.SubmitTransaction:output_type -> sentinel.gateway.v1.TransactionAck
+	8, // 8: sentinel.gateway.v1.GatewayService.GetTransactionStatus:output_type -> sentinel.gateway.v1.TransactionStatusResponse
+	4, // 9: sentinel.gateway.v1.AdminService.ProvisionClient:output_type -> sentinel.gateway.v1.ProvisionClientResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
 	4, // [4:4] is the sub-list for extension type_name
 	4, // [4:4] is the sub-list for extension extendee
 	0, // [0:4] is the sub-list for field type_name
@@ -672,9 +825,9 @@ func file_proto_gateway_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_gateway_proto_rawDesc), len(file_proto_gateway_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_proto_gateway_proto_goTypes,
 		DependencyIndexes: file_proto_gateway_proto_depIdxs,
