@@ -218,6 +218,7 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       PAN_HASH_SECRET: ${PAN_HASH_SECRET}
+      ADMIN_API_KEY: ${ADMIN_API_KEY}
       REDIS_HOST: redis
       LOG_DIR: /logs/api-gateway
       DEPLOY_ENV: docker-compose

@@ -12,6 +12,13 @@
 #
 # See docs/MULTI_TENANT_RESULT_DELIVERY.md for the full design.
 #
+# This is now one of two ways to provision a client — the other is the
+# AdminService.ProvisionClient gRPC RPC on API Gateway (admin-key-gated; see
+# README.md's "Provision a client" section), which does the same four steps
+# natively in Go rather than shelling out to `docker exec`. Keep this script
+# around for break-glass use when the API Gateway itself is down but Postgres
+# and Kafka are reachable directly.
+#
 # Usage:
 #   scripts/provision-client.sh <client_id> <display_name>
 #

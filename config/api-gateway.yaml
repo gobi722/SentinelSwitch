@@ -100,6 +100,17 @@ auth:
   cache_ttl_seconds: 60
 
 # -----------------------------------------------------------------------------
+# ADMIN — gates AdminService.ProvisionClient (client onboarding)
+# A separate, higher-privilege secret from any client's x-api-key — operator
+# use only, never issued to external callers. Constant-time compared
+# (internal/gateway/admin_handler.go), fails closed like everything else
+# here: the service refuses to start if the env var is unset.
+# -----------------------------------------------------------------------------
+admin:
+  key_header: x-admin-key
+  secret_env: ADMIN_API_KEY    # required; service refuses to start if unset
+
+# -----------------------------------------------------------------------------
 # POSTGRES — api_clients registry (used by the auth store)
 # Same PostgreSQL instance/database persistence-svc writes to — just a
 # different table (db/migrations/003_create_api_clients.sql).
