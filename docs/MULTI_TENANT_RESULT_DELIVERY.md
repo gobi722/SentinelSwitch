@@ -180,7 +180,20 @@ header, not registry access at runtime.
   uses 1 partition / RF 1 (matches the single-broker cluster, same divergence the existing quick-start
   commands already make from the file's stated RF 3).
 
-## H. Provisioning script
+## H. Provisioning — script and (later) admin gRPC API
+
+> **Update:** a second provisioning path was added after this design was first implemented —
+> `AdminService.ProvisionClient`, an admin-key-gated gRPC RPC on API Gateway
+> (`services/api-gateway/internal/provisioning/`, `internal/gateway/admin_handler.go`) that performs
+> the same four steps natively in Go (via `segmentio/kafka-go`'s `AlterUserScramCredentials`,
+> `CreateTopics`, and `CreateACLs` client methods) instead of shelling out to `docker exec`. It is a
+> separate proto service — not a `GatewayService` RPC — so it is exempt from the per-client
+> `x-api-key` interceptor and checks its own `x-admin-key` header instead (constant-time compared,
+> mandatory env var `ADMIN_API_KEY`, service refuses to start if unset — same fail-closed pattern as
+> `PAN_HASH_SECRET`/`POSTGRES_PASSWORD`). This is still **operator-gated automation**, not open public
+> self-service signup: only someone holding the admin key can provision a client. The script below is
+> kept as a break-glass path for when the API Gateway itself is down but Postgres/Kafka are reachable
+> directly — both paths produce an identical result (same api_clients row shape, same SCRAM/ACL setup).
 
 `scripts/provision-client.sh <client_id> <display_name>` (bash):
 1. Generate a random API key (`openssl rand -hex 32`), SHA-256 it, insert into `api_clients` via `psql`.

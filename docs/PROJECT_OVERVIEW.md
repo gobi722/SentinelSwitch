@@ -6,7 +6,8 @@
 > multi-tenant per-client Kafka result delivery (Result Notifier — a 5th service). For current,
 > maintained status see [README.md](../README.md) and
 > [docs/MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md). §8–9 below have been
-> updated to reflect actual current status rather than the original build plan.
+> updated to reflect actual current status rather than the original build plan. For the full RPC
+> request/response field reference, see [docs/API_SPEC.md](API_SPEC.md).
 
 ---
 
@@ -421,4 +422,4 @@ the time you're reading this, since that's the more frequently updated copy.
 | CI/CD | No `.github/workflows` — nothing automated verifies a build |
 | Deployment | No Kubernetes manifests. (App services *are* containerized and wired into `docker-compose.yml` now — that part is done.) |
 | Security | No TLS/mTLS anywhere (gRPC or the Kafka SASL listener) |
-| Onboarding | Client provisioning is a manual script (`scripts/provision-client.sh`), not self-service — a deliberate scope decision at current scale, not an oversight |
+| Onboarding | Client provisioning now has an admin-key-gated gRPC API (`AdminService.ProvisionClient`) in addition to the original manual script — see [docs/MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md) §H. Still operator-triggered, not open public self-service signup — that remains a deliberate scope decision at current scale |

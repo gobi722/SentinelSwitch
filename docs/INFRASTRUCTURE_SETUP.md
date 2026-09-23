@@ -717,6 +717,7 @@ All services read these environment variables. Set them in `.env` files or your 
 | Variable | Default | Required | Purpose |
 |---|---|---|---|
 | `PAN_HASH_SECRET` | — | **YES** | HMAC-SHA256 secret for PAN hashing; never hardcode |
+| `ADMIN_API_KEY` | — | **YES** | Gates `AdminService.ProvisionClient` (`x-admin-key` header); separate from any client's `x-api-key`; never hardcode |
 | `REDIS_HOST` | `localhost` | Yes | Redis hostname (standalone mode) |
 | `REDIS_PORT` | `6379` | No | Redis port |
 | `REDIS_PASSWORD` | — | Prod only | Redis auth password |

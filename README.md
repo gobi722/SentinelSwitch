@@ -80,9 +80,11 @@ SentinelSwitch is built to work as an independent product for any external integ
 1. **Authentication** — every `SubmitTransaction` call must carry an `x-api-key` header. The API Gateway hashes it and looks it up against a Postgres `api_clients` registry (Redis-cached, 60 s TTL). A backing-store outage returns `UNAVAILABLE` — it never falls back to admitting the request.
 2. **Identity propagation** — the verified `client_id` (distinct from `merchant_id`, which identifies who the transaction is *for*) rides through `TransactionEvent` → `FraudResultEvent` untouched, so the final result always knows who it belongs to.
 3. **Isolated delivery** — Result Notifier republishes each `FraudResultEvent` to a dedicated `results.<client_id>` Kafka topic on a SASL/SCRAM-authenticated listener (`localhost:9096` in dev). Broker ACLs restrict each client's credentials to only their own topic and a `<client_id>.`-prefixed consumer-group namespace.
-4. **Onboarding** — new clients are provisioned with `scripts/provision-client.sh <client_id> <name>`, which creates the Postgres row, the Kafka SCRAM credential, the dedicated topic, and both ACLs, then prints the API key and SCRAM password once.
+4. **Onboarding** — new clients are provisioned via `AdminService.ProvisionClient`, an admin-key-gated gRPC RPC on API Gateway (`x-admin-key` metadata, separate from any client's `x-api-key`). It creates the Postgres row, the Kafka SCRAM credential, the dedicated topic, and both ACLs in one call, and returns the API key and SCRAM password once. `scripts/provision-client.sh <client_id> <name>` does the same four steps by hand via `docker exec` and remains as a break-glass path for when the API Gateway itself is down.
 
 Full design + verified test results: [docs/MULTI_TENANT_RESULT_DELIVERY.md](docs/MULTI_TENANT_RESULT_DELIVERY.md).
+Full request/response field reference for every RPC (including `ProvisionClient` above):
+[docs/API_SPEC.md](docs/API_SPEC.md).
 
 **Demo tooling** (`scripts/demo/`): `decode-results` is a CLI that decodes a client's raw Kafka messages into readable JSON; `live-dashboard` is a local web page that streams a client's incoming fraud decisions in real time — built for showing "submit a transaction → decision arrives on your own private channel" to a non-technical audience without exposing gRPC/Kafka internals.
 
@@ -124,6 +126,7 @@ Secrets (`PAN_HASH_SECRET`, `POSTGRES_PASSWORD`) are read from a root-level `.en
 # .env (repo root)
 PAN_HASH_SECRET=dev_pan_hash_secret_for_testing
 POSTGRES_PASSWORD=sentinel_local_secret
+ADMIN_API_KEY=dev_admin_key_for_testing   # gates AdminService.ProvisionClient — see step 5
 ```
 
 Check everything came up healthy:
@@ -158,11 +161,23 @@ Every service logs everything to an hourly-rotated file tree at `logs/<service>/
 
 ### 5️⃣ Provision a client and call the API
 
+Via the admin gRPC API (`AdminService.ProvisionClient`, requires `x-admin-key`):
+
+```bash
+grpcurl -plaintext \
+  -H "x-admin-key: dev_admin_key_for_testing" \
+  -d '{"client_id": "my-test-client", "display_name": "My Test Integrator"}' \
+  localhost:50051 \
+  sentinel.gateway.v1.AdminService/ProvisionClient
+```
+
+Or via the equivalent CLI script (useful when the API Gateway itself is down but Postgres/Kafka are reachable directly):
+
 ```bash
 scripts/provision-client.sh my-test-client "My Test Integrator"
 ```
 
-This prints an API key (for `x-api-key` on `SubmitTransaction`) and SCRAM credentials (for consuming `results.my-test-client`) — see [Multi-Tenant Access & Result Delivery](#-multi-tenant-access--result-delivery) above.
+Either path prints an API key (for `x-api-key` on `SubmitTransaction`) and SCRAM credentials (for consuming `results.my-test-client`) — see [Multi-Tenant Access & Result Delivery](#-multi-tenant-access--result-delivery) above.
 
 ### 6️⃣ Build a single image manually (optional)
 
