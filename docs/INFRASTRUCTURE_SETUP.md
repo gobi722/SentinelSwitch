@@ -408,15 +408,22 @@ Production recommendation: three separate Redis instances (or cluster namespaces
 
 ## 6. PostgreSQL Setup
 
-### 6.1 Migration
+### 6.1 Migrations
 
-The Docker Compose volume mounts `./db/migrations/` into `/docker-entrypoint-initdb.d/`. PostgreSQL runs all `.sql` files there on first startup. Migration `001_create_transactions.sql` is applied automatically.
+The Docker Compose volume mounts `./db/migrations/` into `/docker-entrypoint-initdb.d/`. PostgreSQL runs every `.sql` file there, in filename order, but **only on first container startup against a brand-new volume** — `docker-entrypoint-initdb.d` never re-runs against an already-initialized volume. On a fresh `docker compose up`, all four migrations (`001`–`004`) apply automatically:
 
-If you need to apply manually:
+| Migration | Adds |
+|---|---|
+| `001_create_transactions.sql` | `transactions` table, partitions, indexes |
+| `002_add_decision_column.sql` | `decision` column |
+| `003_create_api_clients.sql` | `api_clients` table (API-key auth) |
+| `004_add_client_id_to_transactions.sql` | `client_id` column + index on `transactions` (tenant-scoped `GetTransactionStatus`) |
+
+If your Postgres volume already existed before a migration was added (e.g. you're upgrading an existing local dev environment), apply the new one manually:
 
 ```bash
 psql -h localhost -p 5432 -U sentinel -d sentinelswitch \
-  -f db/migrations/001_create_transactions.sql
+  -f db/migrations/004_add_client_id_to_transactions.sql
 ```
 
 ### 6.2 Verify Table and Partitions
@@ -447,6 +454,7 @@ Expected indexes:
 - `idx_txn_rrn`
 - `idx_txn_status`
 - `idx_txn_card_time`
+- `idx_txn_client_id` (from migration `004` — supports `GetTransactionStatus` lookups scoped to the caller's `client_id`)
 
 ### 6.3 Test Upsert
 

@@ -57,7 +57,7 @@ All services expose Prometheus metrics → scraped by Prometheus → visualized 
 | Cache            | Redis           |
 | Metrics          | Prometheus      |
 | Visualization    | Grafana         |
-| Containerization | Docker — infra via `docker compose`; all 5 services also have working Dockerfiles (build from the repo root, see below) though they aren't part of the compose stack |
+| Containerization | Docker — `docker compose up -d` brings up the full stack: infra + all 5 app services, each built from its own Dockerfile (repo root build context, see below) |
 
 ---
 

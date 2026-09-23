@@ -406,7 +406,7 @@ described a pre-code snapshot; it now reflects actual status.
 | Result Notifier | Done | 5th service — per-client Kafka result delivery, added after this doc was written; see [MULTI_TENANT_RESULT_DELIVERY.md](MULTI_TENANT_RESULT_DELIVERY.md) |
 | Docker Compose (infra) | Done | Kafka (3 listeners incl. SASL/SCRAM), Redis, Postgres, Schema Registry, Prometheus, Grafana |
 | Prometheus + Grafana | Done | All 5 services scraped, dashboards for all 5 |
-| DB migrations | Done (001–003) | `api_clients` table (003) added for the auth work |
+| DB migrations | Done (001–004) | `api_clients` table (003) added for the auth work; `client_id` column + index (004) added to `transactions` so `GetTransactionStatus` can scope lookups to the caller |
 
 ---
 
@@ -419,7 +419,6 @@ the time you're reading this, since that's the more frequently updated copy.
 |---|---|
 | Testing | No unit or integration tests exist for any service |
 | CI/CD | No `.github/workflows` — nothing automated verifies a build |
-| Deployment | No Kubernetes manifests; app services aren't containerized (Dockerfiles exist but were unverified until recently) |
-| API contract | `GetTransactionStatus` — see current implementation status in `services/api-gateway/internal/gateway/handler.go` |
+| Deployment | No Kubernetes manifests. (App services *are* containerized and wired into `docker-compose.yml` now — that part is done.) |
 | Security | No TLS/mTLS anywhere (gRPC or the Kafka SASL listener) |
 | Onboarding | Client provisioning is a manual script (`scripts/provision-client.sh`), not self-service — a deliberate scope decision at current scale, not an oversight |
