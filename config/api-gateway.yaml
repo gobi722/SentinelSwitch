@@ -25,6 +25,10 @@ server:
     host: ${GATEWAY_GRPC_HOST:-0.0.0.0}
     port: ${GATEWAY_GRPC_PORT:-50051}
 
+    # Lets grpcurl/Postman discover services and methods without importing
+    # the .proto files by hand. Fine for local dev; turn off in production.
+    enable_reflection: ${GATEWAY_ENABLE_REFLECTION:-true}
+
     tls:
       enabled: ${GATEWAY_TLS_ENABLED:-false}
       cert_file: ${GATEWAY_TLS_CERT:-/etc/ssl/certs/gateway.crt}

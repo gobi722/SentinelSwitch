@@ -91,6 +91,7 @@ type GRPCConfig struct {
 	Keepalive           KeepaliveConfig `yaml:"keepalive"`
 	MaxRecvMsgSizeBytes int             `yaml:"max_recv_msg_size_bytes"`
 	MaxSendMsgSizeBytes int             `yaml:"max_send_msg_size_bytes"`
+	EnableReflection    bool            `yaml:"enable_reflection"`
 }
 
 type TLSConfig struct {

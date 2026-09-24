@@ -30,6 +30,10 @@ server:
     host: ${RISK_SERVICE_GRPC_HOST:-0.0.0.0}
     port: ${RISK_SERVICE_GRPC_PORT:-50052}
 
+    # Lets grpcurl/Postman discover services and methods without importing
+    # the .proto files by hand. Fine for local dev; turn off in production.
+    enable_reflection: ${RISK_SERVICE_ENABLE_REFLECTION:-true}
+
     tls:
       enabled: ${RISK_SERVICE_TLS_ENABLED:-false}
       cert_file: ${RISK_SERVICE_TLS_CERT:-/etc/ssl/certs/risk-service.crt}

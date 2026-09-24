@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 
 	"github.com/sentinelswitch/api-gateway/internal/auth"
 	"github.com/sentinelswitch/api-gateway/internal/config"
@@ -182,10 +183,11 @@ func main() {
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthSrv)
 	healthSrv.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
-	// gRPC reflection (dev / grpcurl)
-	// if cfg.Server.EnableReflection {
-	// 	reflection.Register(grpcServer)
-	// }
+	// gRPC reflection (dev / grpcurl / Postman) — lets clients discover
+	// services and methods without importing the .proto files by hand.
+	if cfg.Server.GRPC.EnableReflection {
+		reflection.Register(grpcServer)
+	}
 
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.Server.GRPC.Port))
 	if err != nil {
