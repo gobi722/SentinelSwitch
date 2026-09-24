@@ -16,6 +16,12 @@ import (
 // probes (registered separately in cmd/main.go) keep working unauthenticated.
 const healthCheckPrefix = "/grpc.health.v1.Health/"
 
+// adminServicePrefix is exempted from this per-CLIENT interceptor because it
+// has its own, separate admin-key check (see gateway.AdminHandler), not a
+// per-client x-api-key — an operator provisioning a brand-new client cannot,
+// by definition, already hold that client's key.
+const adminServicePrefix = "/sentinel.gateway.v1.AdminService/"
+
 // UnaryServerInterceptor validates the caller's API key on every RPC except
 // health checks, and injects the verified client_id into the request context.
 //
@@ -32,7 +38,8 @@ func UnaryServerInterceptor(cache *Cache, apiKeyHeader, clientIDHeader string, l
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
-		if strings.HasPrefix(info.FullMethod, healthCheckPrefix) {
+		if strings.HasPrefix(info.FullMethod, healthCheckPrefix) ||
+			strings.HasPrefix(info.FullMethod, adminServicePrefix) {
 			return handler(ctx, req)
 		}
 

@@ -21,6 +21,7 @@ type Config struct {
 	PanHashing   PanHashingConfig   `yaml:"pan_hashing"`
 	Idempotency  IdempotencyConfig  `yaml:"idempotency"`
 	Auth         AuthConfig         `yaml:"auth"`
+	Admin        AdminConfig        `yaml:"admin"`
 	Postgres     PostgresConfig     `yaml:"postgres"`
 	Kafka        KafkaConfig        `yaml:"kafka"`
 	Validation   ValidationConfig   `yaml:"validation"`
@@ -39,6 +40,17 @@ type AuthConfig struct {
 	ApiKeyHeader    string `yaml:"api_key_header"`
 	CacheRedisDB    int    `yaml:"cache_redis_db"`
 	CacheTTLSeconds int    `yaml:"cache_ttl_seconds"`
+}
+
+// ---------------------------------------------------------------------------
+// Admin (ProvisionClient — client onboarding)
+// ---------------------------------------------------------------------------
+
+// AdminConfig gates the AdminService.ProvisionClient RPC. Follows the same
+// "name the env var, don't put the secret in YAML" pattern as PanHashingConfig.
+type AdminConfig struct {
+	KeyHeader string `yaml:"key_header"`
+	SecretEnv string `yaml:"secret_env"`
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +277,8 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 	cfg.Redis.Password = redisWrapper.Connection.Auth.Password
 	cfg.Redis.TLS = redisWrapper.Connection.Auth.TLS
 
+	applyAuthDefaults(cfg)
+
 	// Validate mandatory env vars
 	if cfg.PanHashing.SecretEnv == "" {
 		return nil, fmt.Errorf("pan_hashing.secret_env must be set")
@@ -272,8 +286,12 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 	if os.Getenv(cfg.PanHashing.SecretEnv) == "" {
 		return nil, fmt.Errorf("required env var %s is not set (pan_hashing.secret_env)", cfg.PanHashing.SecretEnv)
 	}
-
-	applyAuthDefaults(cfg)
+	if cfg.Admin.SecretEnv == "" {
+		return nil, fmt.Errorf("admin.secret_env must be set")
+	}
+	if os.Getenv(cfg.Admin.SecretEnv) == "" {
+		return nil, fmt.Errorf("required env var %s is not set (admin.secret_env) — ProvisionClient is admin-key-gated and cannot start without it", cfg.Admin.SecretEnv)
+	}
 
 	return cfg, nil
 }
@@ -281,6 +299,9 @@ func Load(gatewayYAML, redisYAML string) (*Config, error) {
 func applyAuthDefaults(cfg *Config) {
 	if cfg.Auth.ApiKeyHeader == "" {
 		cfg.Auth.ApiKeyHeader = "x-api-key"
+	}
+	if cfg.Admin.KeyHeader == "" {
+		cfg.Admin.KeyHeader = "x-admin-key"
 	}
 	if cfg.Auth.CacheTTLSeconds == 0 {
 		cfg.Auth.CacheTTLSeconds = 60

@@ -28,6 +28,7 @@ import (
 	"github.com/sentinelswitch/api-gateway/internal/idempotency"
 	"github.com/sentinelswitch/api-gateway/internal/kafka"
 	"github.com/sentinelswitch/api-gateway/internal/logging"
+	"github.com/sentinelswitch/api-gateway/internal/provisioning"
 	"github.com/sentinelswitch/api-gateway/internal/ratelimit"
 	"github.com/sentinelswitch/api-gateway/internal/txnstatus"
 	gatewayv1 "github.com/sentinelswitch/proto/gateway/v1"
@@ -154,6 +155,14 @@ func main() {
 	// Handler
 	handler := gateway.NewHandler(validator, hasher, idStore, producer, rl, txnStatusStore, log)
 
+	// Admin handler — client onboarding (AdminService.ProvisionClient).
+	// Uses the same Postgres pool as auth (authStore) and the Kafka INTERNAL
+	// listener (cfg.Kafka.Brokers — already kafka:9093 in compose) for SCRAM
+	// credential / topic / ACL management, never the SASL PUBLIC listener.
+	kafkaAdmin := provisioning.NewKafkaAdmin(cfg.Kafka.Brokers)
+	provisioner := provisioning.NewService(authStore, kafkaAdmin, log)
+	adminHandler := gateway.NewAdminHandler(provisioner, cfg.Admin.KeyHeader, os.Getenv(cfg.Admin.SecretEnv), log)
+
 	// -------------------------------------------------------------------------
 	// gRPC server
 	// -------------------------------------------------------------------------
@@ -166,6 +175,7 @@ func main() {
 	)
 
 	gatewayv1.RegisterGatewayServiceServer(grpcServer, handler)
+	gatewayv1.RegisterAdminServiceServer(grpcServer, adminHandler)
 
 	// gRPC health
 	healthSrv := health.NewServer()
