@@ -36,6 +36,9 @@ docs-mine/
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Load-test reports (scripts/loadtest/run.sh output — regenerate, don't commit)
+scripts/loadtest/reports/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/

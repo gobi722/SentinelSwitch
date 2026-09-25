@@ -1,0 +1,13 @@
+{
+  "pan_last4": "1111",
+  "card_expiry": "12/27",
+  "card_hash": "{{.UUID}}",
+  "amount_minor": 50000,
+  "currency": "OMR",
+  "merchant_id": "M00000000000123",
+  "mcc": "5411",
+  "transaction_type": "SALES",
+  "channel": "POS",
+  "terminal_id": "LOADTEST",
+  "idempotency_key": "{{.UUID}}"
+}

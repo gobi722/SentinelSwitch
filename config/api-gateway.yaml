@@ -216,10 +216,13 @@ validation:
 # -----------------------------------------------------------------------------
 rate_limiting:
   enabled: ${RATE_LIMITING_ENABLED:-true}
-  # Max requests per second per client IP
-  requests_per_second: 100
+  # Max requests per second per client_id. Bucketed per caller (see
+  # auth.UnaryServerInterceptor), so a single client cannot exceed this no
+  # matter how much concurrency a load test throws at it — raise this (and
+  # burst) for a load-test run; see scripts/loadtest/.
+  requests_per_second: ${RATE_LIMITING_RPS:-100}
   # Burst allowance — allows short spikes above rps limit
-  burst: 200
+  burst: ${RATE_LIMITING_BURST:-200}
   # Header to read client identity from (falls back to remote IP)
   identity_header: X-Client-ID
 
