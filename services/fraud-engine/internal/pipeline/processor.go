@@ -268,6 +268,7 @@ func (p *Processor) callRiskService(
 
 	if err := p.cb.Allow(ctx); err != nil {
 		riskCallErrors.Inc()
+		p.cb.RecordFallbackUsed()
 		p.logger.Warn("circuit open — using fallback score", zap.String("txn_id", txn.TxnId))
 		return p.cb.FallbackRiskScore(), riskpb.Decision_DECISION_UNSPECIFIED
 	}
@@ -288,6 +289,7 @@ func (p *Processor) callRiskService(
 	if err != nil {
 		riskCallErrors.Inc()
 		p.cb.RecordFailure(ctx)
+		p.cb.RecordFallbackUsed()
 		p.logger.Warn("risk call failed — using fallback score",
 			zap.String("txn_id", txn.TxnId),
 			zap.Error(err),

@@ -49,9 +49,36 @@ func (b *Breaker) Allow(ctx context.Context) error {
 		return nil
 	}
 	if state == StateOpen {
+		openDurationSeconds.Set(b.openDurationSecondsSince(ctx))
 		return ErrCircuitOpen
 	}
+	openDurationSeconds.Set(0)
 	return nil
+}
+
+// openDurationSecondsSince derives how long the circuit has been OPEN from
+// the state key's remaining Redis TTL (elapsed = configured open duration -
+// remaining TTL) — avoids needing a second Redis key just to track an open
+// timestamp.
+func (b *Breaker) openDurationSecondsSince(ctx context.Context) float64 {
+	ttl, err := b.rdb.TTL(ctx, b.cfg.StateKey).Result()
+	if err != nil || ttl < 0 {
+		return 0
+	}
+	total := time.Duration(b.cfg.OpenDurationMs) * time.Millisecond
+	elapsed := total - ttl
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed.Seconds()
+}
+
+// RecordFallbackUsed marks that a fallback risk score was returned to the
+// caller — either the circuit was already OPEN, or this specific Risk
+// Service call just failed. Called from pipeline.Processor at both points
+// where FallbackRiskScore() is actually returned.
+func (b *Breaker) RecordFallbackUsed() {
+	fallbackDecisionsTotal.Inc()
 }
 
 // RecordSuccess is called after a successful Risk Service call.
@@ -77,6 +104,7 @@ func (b *Breaker) RecordSuccess(ctx context.Context) {
 	if int(count) >= b.cfg.SuccessThreshold {
 		b.setState(ctx, StateClosed)
 		b.rdb.Del(ctx, b.cfg.FailuresKey, successKey) //nolint:errcheck
+		stateTransitionsTotal.WithLabelValues(string(StateHalfOpen), string(StateClosed)).Inc()
 		b.logger.Info("circuit breaker: transitioned HALF_OPEN → CLOSED")
 	}
 }
@@ -95,6 +123,7 @@ func (b *Breaker) RecordFailure(ctx context.Context) {
 	if int(count) >= b.cfg.FailureThreshold {
 		openDuration := time.Duration(b.cfg.OpenDurationMs) * time.Millisecond
 		b.setStateWithTTL(ctx, StateOpen, openDuration)
+		stateTransitionsTotal.WithLabelValues(string(StateClosed), string(StateOpen)).Inc()
 		b.logger.Warn("circuit breaker: transitioned CLOSED → OPEN",
 			zap.Int64("failure_count", count),
 			zap.Int("threshold", b.cfg.FailureThreshold),
