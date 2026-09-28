@@ -151,8 +151,24 @@ func (b *Breaker) getState(ctx context.Context) (State, error) {
 	return State(val), nil
 }
 
+// setState is only ever called with StateClosed (from RecordSuccess). It
+// persists with NO expiry — unlike OPEN (setStateWithTTL, below), which is
+// deliberately given a TTL so it auto-expires into the HALF_OPEN probe
+// phase, CLOSED is the steady healthy state and has no such "expire and
+// re-check" story. This used to reuse StateTTLSeconds (the OPEN->HALF_OPEN
+// probe window) for CLOSED too, which meant a perfectly healthy circuit's
+// state key silently expired every state_ttl_seconds, getState() then
+// misread the missing key as a post-OPEN HALF_OPEN, and the next
+// successful call "closed" it again — a spurious HALF_OPEN -> CLOSED
+// transition (with its own log line and, now, metric) despite nothing
+// ever having failed.
 func (b *Breaker) setState(ctx context.Context, state State) {
-	b.setStateWithTTL(ctx, state, time.Duration(b.cfg.StateTTLSeconds)*time.Second)
+	if err := b.rdb.Set(ctx, b.cfg.StateKey, string(state), 0).Err(); err != nil {
+		b.logger.Warn("circuit breaker: set state failed",
+			zap.String("state", string(state)), zap.Error(err))
+	}
+	b.rdb.Set(ctx, b.cfg.FailuresKey, strconv.Itoa(0),
+		time.Duration(b.cfg.FailuresTTLSeconds)*time.Second) //nolint:errcheck
 }
 
 func (b *Breaker) setStateWithTTL(ctx context.Context, state State, ttl time.Duration) {
