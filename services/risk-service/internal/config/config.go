@@ -116,13 +116,13 @@ func Load(path string) (*Config, error) {
 			Health:  HealthConfig{Port: 8084},
 		},
 		DecisionThresholds: ThresholdConfig{
-			ApproveBelow: 400,
-			ReviewFrom:   400,
-			ReviewTo:     700,
-			DeclineAbove: 700,
+			ApproveBelow: 350,
+			ReviewFrom:   350,
+			ReviewTo:     650,
+			DeclineAbove: 650,
 		},
 		Scoring: ScoringConfig{
-			ContributingFactorThreshold: 0.05,
+			ContributingFactorThreshold: 0.06,
 		},
 		Performance: PerformanceConfig{RequestTimeoutMs: 450},
 		Logging:     LoggingConfig{Level: "info", Format: "json"},

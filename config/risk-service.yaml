@@ -1,9 +1,13 @@
 # =============================================================================
 # SentinelSwitch — Risk Service Configuration
-# Ticket  : CREDO-ALERT-001
 # Service : risk-service
 # Role    : gRPC scoring engine — receives feature vector, returns risk_score
 #           and decision recommendation
+#
+# NOTE: The thresholds and weights below are example values for demonstrating
+# the scoring pipeline. They are not the values used by any real deployment —
+# a real deployment configures its own tuned values privately, outside this
+# repo.
 # =============================================================================
 #
 # Contract (proto: RiskService.CalculateRisk):
@@ -16,8 +20,8 @@
 #   Weights in this file are tunable without redeployment.
 #   Decision thresholds are shared with fraud-rules.yaml for consistency.
 #
-# Failure case (req.txt Case 2 — Risk Service down):
-#   Fraud Engine circuit breaker opens → fallback score 600 (REVIEW)
+# Failure case — Risk Service down:
+#   Fraud Engine circuit breaker opens → fallback score 550 (REVIEW)
 #   Risk Service itself does not need to know about the circuit breaker.
 # =============================================================================
 
@@ -68,10 +72,10 @@ server:
 # binary to embed in its RiskResponse without reading the fraud rules file.
 # -----------------------------------------------------------------------------
 decision_thresholds:
-  approve_below: 400     # risk_score < 400  → APPROVE
-  review_from:   400     # 400 ≤ score ≤ 700 → REVIEW
-  review_to:     700
-  decline_above: 700     # risk_score > 700  → DECLINE
+  approve_below: 350     # risk_score < 350  → APPROVE
+  review_from:   350     # 350 ≤ score ≤ 650 → REVIEW
+  review_to:     650
+  decline_above: 650     # risk_score > 650  → DECLINE
 
 # -----------------------------------------------------------------------------
 # SCORING MODEL — weighted feature contributions
@@ -96,7 +100,7 @@ scoring:
     # Amount signal
     # -------------------------------------------------------------------------
     - name: amount_minor
-      weight: 0.20           # 20% contribution
+      weight: 0.18           # 18% contribution
       normalise:
         method: log10        # log10(x) / log10(999999999999) ≈ log10(x) / 12
         cap: 999999999999    # max minor units (~1B OMR)
@@ -105,34 +109,34 @@ scoring:
     # Velocity — transaction count signals
     # -------------------------------------------------------------------------
     - name: txn_count_1min
-      weight: 0.15           # strong signal — rapid-fire in 60 s
+      weight: 0.16           # strong signal — rapid-fire in 60 s
       normalise:
         method: linear_cap
-        cap: 20              # 20+ txns/min → max contribution
+        cap: 18              # 18+ txns/min → max contribution
 
     - name: txn_count_5min
-      weight: 0.10
+      weight: 0.09
       normalise:
         method: linear_cap
-        cap: 30              # 30+ txns/5min → max contribution
+        cap: 28              # 28+ txns/5min → max contribution
 
     - name: txn_count_1hr
-      weight: 0.05
+      weight: 0.06
       normalise:
         method: linear_cap
-        cap: 50              # 50+ txns/hr → max contribution
+        cap: 45              # 45+ txns/hr → max contribution
 
     # -------------------------------------------------------------------------
     # Velocity — amount signals
     # -------------------------------------------------------------------------
     - name: amount_sum_1min
-      weight: 0.15
+      weight: 0.14
       normalise:
         method: log10
         cap: 1000000000      # 1M minor units (~1000 OMR)
 
     - name: amount_sum_1hr
-      weight: 0.08
+      weight: 0.07
       normalise:
         method: log10
         cap: 10000000000     # 10M minor units (~10,000 OMR)
@@ -141,16 +145,16 @@ scoring:
     # Velocity — diversity signals
     # -------------------------------------------------------------------------
     - name: unique_merchants_5min
-      weight: 0.10
+      weight: 0.11
       normalise:
         method: linear_cap
-        cap: 10              # 10+ distinct merchants in 5 min → max contribution
+        cap: 9               # 9+ distinct merchants in 5 min → max contribution
 
     - name: unique_terminals_5min
-      weight: 0.07
+      weight: 0.06
       normalise:
         method: linear_cap
-        cap: 10
+        cap: 9
 
     # -------------------------------------------------------------------------
     # Merchant risk
@@ -164,7 +168,7 @@ scoring:
     # Binary rule flags
     # -------------------------------------------------------------------------
     - name: is_night
-      weight: 0.02           # minor boost — night alone is low signal
+      weight: 0.03           # minor boost — night alone is low signal
       normalise:
         method: binary        # 0 or 1
 
@@ -174,16 +178,16 @@ scoring:
         method: binary
 
     - name: is_card_not_present
-      weight: 0.01
+      weight: 0.02
       normalise:
         method: binary
 
-  # Total configured weight: 1.00
+  # Total configured weight: 0.99
   # Validation: service refuses to start if Σ weights > 1.0
 
   # Contributing factors — included in RiskResponse for explainability
   # A feature is "contributing" when its normalised value × weight > threshold
-  contributing_factor_threshold: 0.05   # 5% of max score
+  contributing_factor_threshold: 0.06   # 6% of max score
 
 # -----------------------------------------------------------------------------
 # PERFORMANCE TUNING

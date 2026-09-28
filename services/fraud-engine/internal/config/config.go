@@ -171,16 +171,16 @@ func applyDefaults(cfg *Config) {
 		cfg.RiskService.Port = 50052
 	}
 	if cfg.RiskService.CircuitBreaker.FailureThreshold == 0 {
-		cfg.RiskService.CircuitBreaker.FailureThreshold = 5
+		cfg.RiskService.CircuitBreaker.FailureThreshold = 4
 	}
 	if cfg.RiskService.CircuitBreaker.SuccessThreshold == 0 {
 		cfg.RiskService.CircuitBreaker.SuccessThreshold = 2
 	}
 	if cfg.RiskService.CircuitBreaker.OpenDurationMs == 0 {
-		cfg.RiskService.CircuitBreaker.OpenDurationMs = 15000
+		cfg.RiskService.CircuitBreaker.OpenDurationMs = 12000
 	}
 	if cfg.RiskService.CircuitBreaker.FallbackRiskScore == 0 {
-		cfg.RiskService.CircuitBreaker.FallbackRiskScore = 600
+		cfg.RiskService.CircuitBreaker.FallbackRiskScore = 550
 	}
 	if cfg.RiskService.CircuitBreaker.StateKey == "" {
 		cfg.RiskService.CircuitBreaker.StateKey = "cb:risk_service:state"
@@ -195,10 +195,10 @@ func applyDefaults(cfg *Config) {
 		cfg.RiskService.CircuitBreaker.FailuresTTLSeconds = 30
 	}
 	if cfg.DecisionThresholds.ApproveBelow == 0 {
-		cfg.DecisionThresholds.ApproveBelow = 400
+		cfg.DecisionThresholds.ApproveBelow = 350
 	}
 	if cfg.DecisionThresholds.DeclineAbove == 0 {
-		cfg.DecisionThresholds.DeclineAbove = 700
+		cfg.DecisionThresholds.DeclineAbove = 650
 	}
 	if cfg.Redis.Port == 0 {
 		cfg.Redis.Port = 6379

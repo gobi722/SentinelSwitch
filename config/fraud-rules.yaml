@@ -1,22 +1,26 @@
 # =============================================================================
 # SentinelSwitch — Fraud Engine Rule Configuration
-# Ticket  : CREDO-ALERT-001
 # Owner   : Fraud Engine (fraud-engine service)
+#
+# NOTE: The thresholds, weights, and score contributions below are example
+# values for demonstrating the rule/velocity/scoring pipeline. They are not
+# the values used by any real deployment — a real deployment configures its
+# own tuned values privately, outside this repo.
 # Reload  : Hot-reload supported — file-watcher triggers rule cache refresh
 #           without restart. Changes take effect within 30 s.
 # =============================================================================
 #
-# Rule evaluation order (req.txt Step 3.1 → 3.2 → 3.3 → 3.4):
+# Rule evaluation order:
 #   1. Rule Engine  — fast synchronous checks (this file, section: rules)
 #   2. Velocity     — Redis time-window counters (this file, section: velocity)
 #   3. Feature prep — build feature vector for Risk Service gRPC call
 #   4. Risk Service — returns risk_score + decision
 #   5. Final merge  — triggered_rules + risk_score → Decision
 #
-# Decision thresholds (req.txt):
-#   risk_score < 400   → APPROVE
-#   400 ≤ score ≤ 700  → REVIEW
-#   score > 700        → DECLINE
+# Decision thresholds:
+#   risk_score < 350   → APPROVE
+#   350 ≤ score ≤ 650  → REVIEW
+#   score > 650        → DECLINE
 #
 # A triggered rule does NOT block the transaction by itself.
 # Rules contribute score_contribution to the feature vector sent to Risk Service.
@@ -27,21 +31,21 @@
 # DECISION THRESHOLDS
 # -----------------------------------------------------------------------------
 decision_thresholds:
-  approve_below: 400
-  review_from:   400
-  review_to:     700
-  decline_above: 700
+  approve_below: 350
+  review_from:   350
+  review_to:     650
+  decline_above: 650
 
 # -----------------------------------------------------------------------------
 # CIRCUIT BREAKER — Risk Service (gRPC)
-# req.txt Failure Case 2: Risk Service down → use fallback score
+# Failure case: Risk Service down → use fallback score
 # -----------------------------------------------------------------------------
 circuit_breaker:
-  failure_threshold:     5       # open circuit after 5 consecutive failures
+  failure_threshold:     4       # open circuit after 4 consecutive failures
   success_threshold:     2       # close circuit after 2 consecutive successes
-  timeout_ms:            500     # gRPC call timeout — fail fast
-  open_duration_ms:      15000   # wait 15 s before half-open probe
-  fallback_risk_score:   600     # conservative REVIEW score used when circuit open
+  timeout_ms:            400     # gRPC call timeout — fail fast
+  open_duration_ms:      12000   # wait 12 s before half-open probe
+  fallback_risk_score:   550     # conservative REVIEW score used when circuit open
   fallback_decision:     REVIEW  # never auto-DECLINE on a circuit-open scenario
 
   # Observability — emitted whenever circuit state transitions or fallback is used
@@ -89,27 +93,27 @@ rules:
   - id: HIGH_AMOUNT
     description: Transaction amount exceeds per-currency threshold
     enabled: true
-    score_contribution: 200
+    score_contribution: 180
     condition:
       type: amount_threshold
       # Thresholds in minor currency units
-      # OMR: 3 decimal places → 500 OMR = 500000 minor
-      # INR: 2 decimal places → 50000 INR = 5000000 minor
-      # USD: 2 decimal places → 5000 USD = 500000 minor
+      # OMR: 3 decimal places → 450 OMR = 450000 minor
+      # INR: 2 decimal places → 45000 INR = 4500000 minor
+      # USD: 2 decimal places → 4500 USD = 450000 minor
       thresholds:
-        OMR: 500000    # 500.000 OMR
-        INR: 5000000   # 50,000 INR
-        USD: 500000    # 5,000 USD
-        AED: 1837500   # 5,000 USD equivalent
-        SAR: 1875000   # 5,000 USD equivalent
-        BHD: 188500    # 500 USD equivalent (BHD = ~2.65 USD)
-        KWD: 153000    # 500 USD equivalent (KWD = ~3.27 USD)
-        DEFAULT: 500000 # fallback for unlisted currencies — conservative
+        OMR: 450000    # 450.000 OMR
+        INR: 4500000   # 45,000 INR
+        USD: 450000    # 4,500 USD
+        AED: 1653750   # 4,500 USD equivalent
+        SAR: 1687500   # 4,500 USD equivalent
+        BHD: 169650    # 450 USD equivalent (BHD = ~2.65 USD)
+        KWD: 137700    # 450 USD equivalent (KWD = ~3.27 USD)
+        DEFAULT: 450000 # fallback for unlisted currencies — conservative
 
   - id: ROUND_AMOUNT
     description: Suspiciously round large amount (common in structuring attacks)
     enabled: true
-    score_contribution: 80
+    score_contribution: 70
     condition:
       type: round_amount
       # Triggers if amount_minor is divisible by 100000 (i.e. ends in exactly 3+ zeros)
@@ -123,7 +127,7 @@ rules:
   - id: RISKY_MCC
     description: Transaction at high-risk merchant category
     enabled: true
-    score_contribution: 150
+    score_contribution: 140
     condition:
       type: mcc_list
       # ISO 18245 MCC codes considered high-risk
@@ -142,7 +146,7 @@ rules:
   - id: CRYPTO_EXCHANGE_MCC
     description: Transaction at cryptocurrency exchange or digital asset platform
     enabled: true
-    score_contribution: 120
+    score_contribution: 110
     condition:
       type: mcc_list
       mcc_codes:
@@ -155,17 +159,17 @@ rules:
   - id: NIGHT_TRANSACTION
     description: Transaction during low-activity hours (local cardholder time)
     enabled: true
-    score_contribution: 60
+    score_contribution: 50
     condition:
       type: time_window
-      # Uses txn_timestamp UTC. Adjust if timezone enrichment is added later.
-      start_hour_utc: 0   # midnight
-      end_hour_utc:   5   # 05:00 UTC (covers 23:00–03:00 for Gulf region, UTC+3..+4)
+      # Uses txn_timestamp UTC. Adjust to match the deployment's target region.
+      start_hour_utc: 1   # 01:00 UTC
+      end_hour_utc:   4   # 04:00 UTC
 
   - id: WEEKEND_HIGH_AMOUNT
     description: High-value transaction on weekend combined with HIGH_AMOUNT rule
     enabled: true
-    score_contribution: 40
+    score_contribution: 35
     condition:
       type: composite
       # Only adds contribution when BOTH conditions are true:
@@ -180,7 +184,7 @@ rules:
   - id: CARD_NOT_PRESENT
     description: Payment Gateway (online / CNP) transaction — higher fraud rate
     enabled: true
-    score_contribution: 50
+    score_contribution: 45
     condition:
       type: channel_match
       channels: [PG]
@@ -188,7 +192,7 @@ rules:
   - id: FOREIGN_CURRENCY
     description: Transaction currency does not match expected domestic currencies
     enabled: true
-    score_contribution: 70
+    score_contribution: 65
     condition:
       type: currency_not_in
       # Domestic currencies for this deployment (Oman/GCC focus)
@@ -215,49 +219,49 @@ velocity:
     enabled: true
     window_seconds: 60
     # If card has ≥ threshold transactions in window → trigger
-    threshold: 5
-    score_contribution: 250   # High weight — rapid-fire is a strong fraud signal
+    threshold: 4
+    score_contribution: 230   # High weight — rapid-fire is a strong fraud signal
     contributed_field: txn_count_1min
 
   - id: TXN_COUNT_5MIN
     description: Number of transactions on same card in last 5 minutes
     enabled: true
     window_seconds: 300
-    threshold: 10
-    score_contribution: 150
+    threshold: 8
+    score_contribution: 140
     contributed_field: txn_count_5min
 
   - id: TXN_COUNT_1HR
     description: Number of transactions on same card in last 60 minutes
     enabled: true
     window_seconds: 3600
-    threshold: 20
-    score_contribution: 80
+    threshold: 18
+    score_contribution: 75
     contributed_field: txn_count_1hr
 
   - id: AMOUNT_SUM_1MIN
     description: Total amount (minor units) spent on same card in last 60 seconds
     enabled: true
     window_seconds: 60
-    # Threshold in minor units — 100 OMR = 100000 minor
-    threshold_minor: 100000
-    score_contribution: 200
+    # Threshold in minor units — 90 OMR = 90000 minor
+    threshold_minor: 90000
+    score_contribution: 190
     contributed_field: amount_sum_1min
 
   - id: AMOUNT_SUM_1HR
     description: Total amount (minor units) spent on same card in last 60 minutes
     enabled: true
     window_seconds: 3600
-    threshold_minor: 1000000   # 1000 OMR
-    score_contribution: 100
+    threshold_minor: 900000   # 900 OMR
+    score_contribution: 95
     contributed_field: amount_sum_1hr
 
   - id: UNIQUE_MERCHANTS_5MIN
     description: Number of distinct merchants used by same card in last 5 minutes
     enabled: true
     window_seconds: 300
-    threshold: 3
-    score_contribution: 180
+    threshold: 4
+    score_contribution: 170
     contributed_field: unique_merchants_5min
     # Implementation note: use a Redis HyperLogLog per card per window
     # Key: hll:merchants:{card_hash}:{window_bucket}
@@ -266,8 +270,8 @@ velocity:
     description: Number of distinct terminals used by same card in last 5 minutes
     enabled: true
     window_seconds: 300
-    threshold: 4
-    score_contribution: 120
+    threshold: 5
+    score_contribution: 115
     contributed_field: unique_terminals_5min
 
 # =============================================================================
@@ -287,10 +291,10 @@ merchant_risk:
   default_unknown: 0.5
   # Static overrides for demo / testing — production values come from DB batch
   static_overrides:
-    M_TRUSTED_001: 0.05
-    M_TRUSTED_002: 0.10
-    M_RISKY_001:   0.90
-    M_RISKY_002:   0.85
+    M_TRUSTED_001: 0.08
+    M_TRUSTED_002: 0.12
+    M_RISKY_001:   0.88
+    M_RISKY_002:   0.82
 
 # =============================================================================
 # FEATURE VECTOR DEFINITION
