@@ -4,6 +4,7 @@
 ![Kafka](https://img.shields.io/badge/Kafka-Event--Driven-231F20?logo=apachekafka&logoColor=white)
 ![gRPC](https://img.shields.io/badge/gRPC-Protobuf-4285F4?logo=grpc&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
 SentinelSwitch is a distributed, event-driven payment transaction and fraud monitoring platform built using Go.
 It simulates a real-world payment switch architecture using Kafka, gRPC, PostgreSQL, Redis, Prometheus, and Grafana, and exposes itself as a multi-tenant product — any authenticated external caller can submit transactions and receive their own fraud decisions back, isolated from every other caller.
@@ -20,6 +21,8 @@ This project demonstrates scalable microservice architecture, real-time fraud sc
 - **Full observability**: Prometheus metrics per service (all 5 scraped), Grafana dashboards for TPS, fraud ratio, latency, and consumer lag
 - **Liveness + readiness health checks**: `/healthz` (process is up) and `/readyz` (real dependencies — Postgres/Redis/etc. — are actually reachable) on every service
 - **Per-service rotating file logs**: each service logs everything to its own hourly-rotated file tree; the terminal only shows output during startup, so it stays readable during manual testing
+
+> **Note:** the thresholds, weights, and score contributions in [config/fraud-rules.yaml](config/fraud-rules.yaml) and [config/risk-service.yaml](config/risk-service.yaml) are illustrative demo values for showing how the rule/velocity/scoring pipeline fits together — not tuned production values.
 
 ---
 
@@ -120,14 +123,13 @@ Docker Compose brings up the full stack in dependency order: infrastructure — 
 docker compose up -d
 ```
 
-Secrets (`PAN_HASH_SECRET`, `POSTGRES_PASSWORD`) are read from a root-level `.env` file, which is gitignored and not committed — create one locally before first run:
+Secrets are read from a root-level `.env` file, which is gitignored and not committed — copy the tracked template and fill in your own local values before first run:
 
 ```bash
-# .env (repo root)
-PAN_HASH_SECRET=dev_pan_hash_secret_for_testing
-POSTGRES_PASSWORD=sentinel_local_secret
-ADMIN_API_KEY=dev_admin_key_for_testing   # gates AdminService.ProvisionClient — see step 5
+cp .env.example .env
 ```
+
+See [.env.example](.env.example) for the full list (`PAN_HASH_SECRET`, `POSTGRES_PASSWORD`, `GF_SECURITY_ADMIN_PASSWORD`, `ADMIN_API_KEY` — the last one gates `AdminService.ProvisionClient`, see step 5 — plus rate-limiting knobs).
 
 Check everything came up healthy:
 
@@ -190,3 +192,9 @@ docker build -f services/api-gateway/Dockerfile -t sentinel-api-gateway .
 Swap the service name in both places for the other 4. Compose already builds and runs all 5 (step 2) — this is only useful for inspecting a single image in isolation.
 
 > For full setup steps (environment variables, ports, health checks, and troubleshooting), see [docs/INFRASTRUCTURE_SETUP.md](docs/INFRASTRUCTURE_SETUP.md).
+
+---
+
+## 📜 License
+
+Licensed under the [Apache License 2.0](LICENSE). You're free to fork, modify, and use this project — including commercially — as long as you keep the license and copyright notice and note any changes you make.
