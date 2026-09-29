@@ -1,6 +1,5 @@
 # SentinelSwitch — Infrastructure Setup Guide
 
-**Ticket:** CREDO-ALERT-001
 **Scope:** Kafka, Redis, PostgreSQL, Schema Registry, Prometheus, Grafana — local Docker Compose and production notes
 
 ---

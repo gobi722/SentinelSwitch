@@ -2,7 +2,6 @@
 
 **Status:** Implemented, committed, and verified end-to-end against a running local stack (see
 Verification below for what was actually confirmed and how).
-**Ticket:** CREDO-ALERT-001 (follow-on)
 
 ## Context
 

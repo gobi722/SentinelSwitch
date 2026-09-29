@@ -1,11 +1,10 @@
 # =============================================================================
 # SentinelSwitch — Persistence Service Configuration
-# Ticket  : CREDO-ALERT-001
 # Service : persistence-svc
 # Role    : Consumes fraud_results, upserts into PostgreSQL, DLQs on failure
 # =============================================================================
 #
-# Processing flow (req.txt Step 6):
+# Processing flow:
 #   1. Consume FraudResultEvent from Kafka topic: fraud_results
 #   2. Upsert into PostgreSQL transactions table
 #      INSERT ... ON CONFLICT (txn_id, txn_timestamp) DO UPDATE SET ...
@@ -14,7 +13,7 @@
 #      failure metadata headers
 #   5. Commit Kafka offset only after successful DB write (or DLQ publish)
 #
-# Failure scenario (req.txt Case 3 — PostgreSQL down):
+# Failure scenario — PostgreSQL down:
 #   Attempt 1: immediate
 #   Attempt 2: 5 s delay after attempt 1 failure
 #   Attempt 3: 10 s delay after attempt 2 failure  → total wait ≈ 15 s before DLQ
@@ -57,7 +56,7 @@ kafka:
     delivery_timeout_ms: 30000
     client_id: sentinel-persistence-svc-dlq
 
-    # Headers attached to every DLQ message (req.txt Case 3):
+    # Headers attached to every DLQ message:
     #   dlq-original-topic      : "fraud_results"
     #   dlq-original-offset     : "<offset>"
     #   dlq-original-partition  : "<partition>"
@@ -117,7 +116,7 @@ postgres:
 # -----------------------------------------------------------------------------
 # RETRY POLICY — on PostgreSQL write failure
 # Exponential backoff with jitter. After max_attempts, publish to DLQ.
-# req.txt: "3 attempts, max 30 s total"
+# Policy: 3 attempts, max 30 s total.
 # -----------------------------------------------------------------------------
 retry:
   max_attempts: 3

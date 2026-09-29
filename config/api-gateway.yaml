@@ -1,11 +1,10 @@
 # =============================================================================
 # SentinelSwitch — API Gateway Service Configuration
-# Ticket  : CREDO-ALERT-001
 # Service : api-gateway
 # Role    : Entry point — validates, deduplicates, publishes to Kafka, returns ACK
 # =============================================================================
 #
-# Runtime flow (req.txt Step 1):
+# Runtime flow:
 #   1. Receive SubmitTransaction gRPC request from client
 #   2. Validate fields (amount, card, currency, mcc)
 #   3. Hash PAN → card_hash (HMAC-SHA256)

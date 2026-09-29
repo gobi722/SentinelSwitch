@@ -1,6 +1,5 @@
 # =============================================================================
 # SentinelSwitch — Kafka Topic Configuration
-# Ticket  : CREDO-ALERT-001
 # Managed : Confluent Cloud / self-hosted Kafka (apply via kafka-topics CLI
 #           or Terraform confluent_kafka_topic resource)
 # =============================================================================
@@ -57,7 +56,7 @@ topics:
   # Key       : txn_id (string UUID)
   # Value     : raw FraudResultEvent bytes (identical payload that failed)
   #
-  # Failure scenario (from req.txt Case 3):
+  # Failure scenario:
   #   Persistence Service tries to upsert fraud result → DB unreachable
   #   → retries with exponential backoff (3 attempts, max 30 s total)
   #   → on 3rd failure → publish to transaction_dlq with failure metadata header

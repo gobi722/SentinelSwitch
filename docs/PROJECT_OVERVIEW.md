@@ -1,5 +1,4 @@
 # SentinelSwitch — Project Overview
-**Ticket:** CREDO-ALERT-001
 
 > **Note:** this document was written when the core pipeline (§1–7 below) was first built and
 > is still accurate for that part of the system. It predates API-key authentication and the

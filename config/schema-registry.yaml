@@ -1,6 +1,5 @@
 # =============================================================================
 # SentinelSwitch — Confluent Schema Registry Configuration
-# Ticket : CREDO-ALERT-001
 # =============================================================================
 
 schema_registry:

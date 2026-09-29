@@ -1,6 +1,5 @@
 # =============================================================================
 # SentinelSwitch — Result Notifier Service Configuration
-# Ticket  : CREDO-ALERT-001 (multi-tenant result delivery follow-on)
 # Service : result-notifier
 # Role    : Bridges the internal fraud_results topic to per-client external
 #           topics, so external callers/integrators can consume only their

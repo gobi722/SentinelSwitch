@@ -1,6 +1,5 @@
 # =============================================================================
 # SentinelSwitch — Redis Configuration
-# Ticket  : CREDO-ALERT-001
 # Clients : API Gateway (idempotency), Fraud Engine (velocity + merchant risk)
 # =============================================================================
 #
@@ -74,7 +73,7 @@ idempotency:
   # Key: idempotency:{txn_id}
   # Value: "1"  (presence = seen; absence = new)
   # SET NX EX {ttl_seconds}  — atomic check-and-set
-  ttl_seconds: 86400            # 24 hours (req.txt: "24-hour idempotency window")
+  ttl_seconds: 86400            # 24-hour idempotency window
 
   # If Redis is unreachable, API Gateway falls through (allow-through policy):
   #   - Log warning metric: sentinel_idempotency_redis_miss_total
