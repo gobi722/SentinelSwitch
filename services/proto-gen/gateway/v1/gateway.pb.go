@@ -1,7 +1,6 @@
 // =============================================================================
 // SentinelSwitch — API Gateway Inbound Contract
 // Service : GatewayService
-// Ticket  : CREDO-ALERT-001
 //
 // This file defines the synchronous gRPC surface that the API Gateway
 // exposes to merchant-facing clients (POS terminals, payment-page SDKs).

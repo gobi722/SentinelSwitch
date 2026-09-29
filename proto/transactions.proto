@@ -1,7 +1,6 @@
 // =============================================================================
 // SentinelSwitch — Kafka Topic Schema
 // Topic  : transactions
-// Ticket : CREDO-ALERT-001
 // Registry subject : transactions-value
 // Compatibility    : BACKWARD
 // =============================================================================

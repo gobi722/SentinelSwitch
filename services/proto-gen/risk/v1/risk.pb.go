@@ -1,10 +1,8 @@
 // =============================================================================
 // SentinelSwitch — gRPC Service Contract
 // Service : RiskService
-// Ticket  : CREDO-ALERT-001
 // Fix     : amount changed from double → int64 (minor units) to avoid
 //           floating-point representation errors on amounts like OMR 5.250
-// Ticket  : CREDO-ALERT-002
 // Fix     : RiskRequest.features (FraudFeatures) added to carry the full
 //           11-field feature vector defined in fraud-rules.yaml.
 //           Fields 7–9 (velocity_window / velocity_count / velocity_amount)
