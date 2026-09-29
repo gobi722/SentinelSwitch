@@ -6,6 +6,11 @@
 ![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![License](https://img.shields.io/badge/License-Apache%202.0-blue)
 
+📹 **[Watch the demo](docs/assets/Sentinel-switch-Demo.mp4)** — load test, live Grafana dashboard, and per-client Kafka delivery, end to end.
+
+> ⚡ **503 req/s peak throughput · 1.38 Million transactions processed · 0 data loss · real-time fraud scoring across 5 microservices**
+> *(measured with the load-test tooling in [scripts/loadtest/](scripts/loadtest/) — see the demo above)*
+
 SentinelSwitch is a distributed, event-driven payment transaction and fraud monitoring platform built using Go.
 It simulates a real-world payment switch architecture using Kafka, gRPC, PostgreSQL, Redis, Prometheus, and Grafana, and exposes itself as a multi-tenant product — any authenticated external caller can submit transactions and receive their own fraud decisions back, isolated from every other caller.
 
