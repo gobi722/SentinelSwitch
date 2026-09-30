@@ -2,7 +2,7 @@
   "pan_last4": "1111",
   "card_expiry": "12/27",
   "card_hash": "{{.UUID}}",
-  "amount_minor": 50000,
+  "amount_minor": {{if eq (mod .RequestNumber 5) 0}}{{randInt 500000 2000000}}{{else}}{{randInt 1000 30000}}{{end}},
   "currency": "OMR",
   "merchant_id": "M00000000000123",
   "mcc": "5411",
